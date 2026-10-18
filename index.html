@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scope Screenshot Analyzer</title>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body class="empty">
+
+<header class="toolbar">
+  <div class="brand">Scope Screenshot Analyzer</div>
+  <div class="group">
+    <button data-act="open-files" title="Open image files">Open files</button>
+    <button data-act="open-folder" title="Open all images in a folder">Open folder</button>
+    <span class="hint">or drop files/folders · <kbd>Ctrl</kbd>+<kbd>V</kbd> to paste</span>
+  </div>
+  <div class="spacer"></div>
+  <div class="group">
+    <button data-act="export" title="Save all images + measurements to a .json file">Export session</button>
+    <button data-act="import" title="Load a previously exported .json session">Import session</button>
+    <button data-act="clear" class="danger" title="Remove all images">Clear all</button>
+    <button data-act="help" title="Shortcuts (?)">?</button>
+  </div>
+</header>
+
+<main>
+  <aside class="strip">
+    <div class="strip-head"><span>Images</span><span id="strip-count" class="muted"></span></div>
+    <ul id="strip-list"></ul>
+  </aside>
+
+  <section class="stage">
+    <div class="stage-tools">
+      <button id="tgl-calib" class="toggle" title="Show graticule & 0-level markers (O)">Calibration</button>
+      <button id="tgl-traces" class="toggle" title="Show extracted traces (T)">Traces</button>
+      <button id="tgl-labels" class="toggle" title="Show values at cursor (L)">Values</button>
+      <span class="sep"></span>
+      <button data-act="zoom-out" title="Zoom out (−)">−</button>
+      <span id="zoom-level" class="muted">100%</span>
+      <button data-act="zoom-in" title="Zoom in (+)">+</button>
+      <button data-act="fit" title="Fit whole screenshot (F)">Fit</button>
+      <button data-act="fit-grid" title="Zoom to the graticule (G)">Fit grid</button>
+    </div>
+    <div class="canvas-wrap"><canvas id="view"></canvas></div>
+    <div class="empty-state">
+      <div class="drop-card">
+        <h2>Load scope screenshots</h2>
+        <p>Drop images or folders here, paste with <kbd>Ctrl</kbd>+<kbd>V</kbd>, or</p>
+        <div><button data-act="open-files">Open files</button> <button data-act="open-folder">Open folder</button></div>
+        <p class="muted">Known layouts: R&amp;S RTB2004. Other screenshots can be calibrated manually.</p>
+      </div>
+    </div>
+    <div class="drop-overlay"><div>Drop to load</div></div>
+  </section>
+
+  <aside class="panel">
+    <section class="card">
+      <div class="card-head"><h3>Cursors</h3><button data-act="copy" class="small" title="Copy readout as tab-separated text (C)">Copy</button></div>
+      <div id="readout"></div>
+      <p class="tip muted">Drag the lines · double-click to move the nearest · <kbd>←</kbd><kbd>→</kbd> nudge (<kbd>Shift</kbd> ×10, <kbd>Alt</kbd> ¼ px)</p>
+    </section>
+    <section class="card">
+      <div class="card-head"><h3>Calibration</h3></div>
+      <div id="calib"></div>
+    </section>
+  </aside>
+</main>
+
+<footer class="status">
+  <span id="status-doc"></span>
+  <span id="status-hover"></span>
+</footer>
+
+<div id="toast"></div>
+
+<dialog id="help">
+  <h3>Shortcuts &amp; tips</h3>
+  <table>
+    <tr><td><kbd>↑</kbd> <kbd>↓</kbd> / <kbd>PgUp</kbd> <kbd>PgDn</kbd></td><td>Previous / next image</td></tr>
+    <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>Nudge selected cursor 1 px (<kbd>Shift</kbd> 10 px, <kbd>Alt</kbd> ¼ px)</td></tr>
+    <tr><td><kbd>1</kbd> <kbd>2</kbd> / <kbd>Tab</kbd></td><td>Select cursor 1 / 2 / toggle</td></tr>
+    <tr><td>Double-click</td><td>Move nearest cursor to this position</td></tr>
+    <tr><td>Drag empty area · wheel</td><td>Pan · zoom</td></tr>
+    <tr><td><kbd>F</kbd> / <kbd>0</kbd>, <kbd>G</kbd>, <kbd>+</kbd> <kbd>−</kbd></td><td>Fit screenshot, fit graticule, zoom in/out</td></tr>
+    <tr><td><kbd>T</kbd> <kbd>O</kbd> <kbd>L</kbd></td><td>Toggle extracted traces / calibration overlay / value labels</td></tr>
+    <tr><td><kbd>C</kbd></td><td>Copy readout (tab-separated)</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>V</kbd></td><td>Paste screenshot from clipboard</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Cancel picking mode</td></tr>
+  </table>
+  <p class="muted">Values show the centre of the drawn trace; the small range below each value is the band the
+  screenshot actually shows (trace thickness, sample blocks at fast timebases, persistence spread).
+  Fields marked <span class="badge warn">!</span> could not be confirmed by two sources — check them.
+  Everything is saved automatically in this browser; use Export to move a session to another computer.</p>
+  <div class="dialog-actions"><button data-act="close">Close</button></div>
+</dialog>
+
+<script src="js/util.js"></script>
+<script src="js/ocr_glyphs.js"></script>
+<script src="js/ocr.js"></script>
+<script src="js/calibrate.js"></script>
+<script src="js/layouts/index.js"></script>
+<script src="js/layouts/rtb2004.js"></script>
+<script src="js/traces.js"></script>
+<script src="js/measure.js"></script>
+<script src="js/state.js"></script>
+<script src="js/loaders.js"></script>
+<script src="js/view.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

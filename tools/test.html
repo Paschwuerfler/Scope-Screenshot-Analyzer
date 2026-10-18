@@ -1,0 +1,81 @@
+<!doctype html>
+<!--
+  Regression test: runs layout detection, calibration and trace extraction on every sample
+  in tools/samples.js and compares against the ground truth (incl. the scope's own cursor
+  readout). Run via tools/run_tests.ps1, or open in a browser started with
+  --allow-file-access-from-files.
+-->
+<html><head><meta charset="utf-8"><title>Scope Analyzer tests</title>
+<style>body{font:13px monospace;background:#111;color:#ddd} .fail{color:#f66} .pass{color:#6f6}</style></head>
+<body>
+<pre id="out">PENDING</pre>
+<script src="../js/util.js"></script>
+<script src="../js/ocr_glyphs.js"></script>
+<script src="../js/ocr.js"></script>
+<script src="../js/calibrate.js"></script>
+<script src="../js/layouts/index.js"></script>
+<script src="../js/layouts/rtb2004.js"></script>
+<script src="../js/traces.js"></script>
+<script src="../js/measure.js"></script>
+<script src="samples.js"></script>
+<script>
+function loadImg(src) {
+  return new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => {
+      const c = document.createElement('canvas'); c.width = im.width; c.height = im.height;
+      const x = c.getContext('2d'); x.drawImage(im, 0, 0);
+      res(x.getImageData(0, 0, im.width, im.height));
+    };
+    im.onerror = () => rej(new Error('cannot load ' + src));
+    im.src = src;
+  });
+}
+
+(async () => {
+  const lines = []; let fails = 0, checks = 0;
+  const F = App.util.formatSI;
+  const check = (name, ok, detail) => { checks++; if (!ok) fails++; lines.push(`  ${ok ? 'PASS' : 'FAIL'}  ${name}  ${detail}`); };
+  for (const s of SAMPLES) {
+    lines.push(`\n== ${s.file}`);
+    const img = await loadImg('../samples/' + s.file);
+    const t0 = performance.now();
+    const det = App.layouts.detect(img);
+    check('layout', det.layout && det.layout.id === s.layout, `${det.layout ? det.layout.id : 'none'} score=${det.score.toFixed(2)}`);
+    if (!det.layout) continue;
+    const r = det.layout.analyze(img);
+    const c = r.calib;
+    const t1 = performance.now();
+    lines.push(`  raw: ${JSON.stringify(r.raw)}`);
+    r.notes.forEach(n => lines.push(`  note: ${n}`));
+    check('tdiv', Math.abs(c.time.tdiv - s.tdiv) <= s.tdiv * 0.005, `${F(c.time.tdiv, 's')} [${r.status.time.tdiv}] expected ${F(s.tdiv, 's')}`);
+    check('tCenter', Math.abs(c.time.tCenter - s.pos) <= s.tdiv * 0.05, `${F(c.time.tCenter, 's')} [${r.status.time.tCenter}] expected ${F(s.pos, 's')}`);
+    const on = Object.keys(c.channels).filter(k => c.channels[k].on).sort().join(',');
+    check('active channels', on === Object.keys(s.channels).sort().join(','), on);
+    check('persistence', c.persistence === s.persistence, String(c.persistence));
+    for (const [id, exp] of Object.entries(s.channels)) {
+      const ch = c.channels[id], st = r.status.channels[id] || {};
+      check(`${id} V/div`, Math.abs(ch.vdiv - exp.vdiv) <= exp.vdiv * 0.01, `${ch.vdiv} [${st.vdiv}]`);
+      check(`${id} zeroY`, Math.abs(ch.zeroY - exp.zeroY) <= 2, `${ch.zeroY.toFixed(1)} [${st.zeroY}] expected ${exp.zeroY}`);
+    }
+    // Measurement chain vs the scope's own cursor readout
+    const traces = App.traces.extract(img, c);
+    const t2 = performance.now();
+    const doc = { calib: c, traces, cursors: { x1: App.calib.xAt(c, s.scopeCursor.t1), x2: App.calib.xAt(c, s.scopeCursor.t2) } };
+    const ro = App.measure.cursorReadout(doc);
+    const ch = ro.channels.find(q => q.id === s.scopeCursor.ch);
+    // The screenshot only shows the waveform as a band (sample blocks / persistence spread);
+    // a reading passes if the scope's value is within 2 V of our centre value or inside the
+    // displayed band (+-1 V).
+    const within = (val, exp) => val && (Math.abs(val.v - exp) <= 2 || (exp >= val.vMin - 1 && exp <= val.vMax + 1));
+    const fmt = val => val ? `${val.v.toFixed(2)} (band ${val.vMin.toFixed(1)}..${val.vMax.toFixed(1)})` : '–';
+    check('cursor V1', ch && within(ch.a, s.scopeCursor.v1), `${fmt(ch && ch.a)} expected ${s.scopeCursor.v1}`);
+    check('cursor V2', ch && within(ch.b, s.scopeCursor.v2), `${fmt(ch && ch.b)} expected ${s.scopeCursor.v2}`);
+    for (const [id, tr] of Object.entries(traces)) lines.push(`  trace ${id}: ${tr.found} columns`);
+    lines.push(`  time: analyze ${(t1 - t0).toFixed(0)} ms, traces ${(t2 - t1).toFixed(0)} ms`);
+  }
+  lines.unshift(`${fails ? 'FAILED' : 'ALL PASSED'}: ${checks - fails}/${checks} checks`);
+  document.getElementById('out').innerHTML = lines.map(l => `<span class="${/FAIL/.test(l) ? 'fail' : /PASS/.test(l) ? 'pass' : ''}">${App.util.escapeHtml(l)}</span>`).join('\n');
+})().catch(e => { document.getElementById('out').textContent = 'ERROR ' + e.stack; });
+</script>
+</body></html>
