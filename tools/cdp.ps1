@@ -2,7 +2,7 @@
 #
 # Usage:
 #   . tools\cdp.ps1
-#   $s = Start-CdpSession 'index.html?demo=1' -Width 1600 -Height 950
+#   $s = Start-CdpSession 'index.html?samples=1' -Width 1600 -Height 950
 #   Wait-Cdp $s 'document.body.dataset.demoReady === "1"'
 #   Invoke-Cdp $s 'Input.dispatchMouseEvent' @{ type='mousePressed'; x=500; y=300; button='left'; clickCount=1 }
 #   Invoke-CdpJs $s 'App.docs.list().length'
@@ -10,7 +10,10 @@
 #   Stop-CdpSession $s
 . "$PSScriptRoot\headless.ps1"
 
-function Start-CdpSession([string]$page, [int]$Width = 1600, [int]$Height = 950, [int]$Port = 9333) {
+function Start-CdpSession([string]$page, [int]$Width = 1600, [int]$Height = 950, [int]$Port = 0) {
+  if (-not $Port) {   # pick a free port so consecutive sessions don't collide
+    $l = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0); $l.Start(); $Port = $l.LocalEndpoint.Port; $l.Stop()
+  }
   $browser = Find-Browser
   $root = Split-Path $PSScriptRoot -Parent
   $path, $query = $page -split '\?', 2
@@ -24,6 +27,7 @@ function Start-CdpSession([string]$page, [int]$Width = 1600, [int]$Height = 950,
     try { $targets = Invoke-RestMethod "http://127.0.0.1:$Port/json" } catch {}
   }
   $t = @($targets | Where-Object { $_.type -eq 'page' })[0]
+  if (-not $t) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue; throw "Browser did not expose a debuggable page on port $Port" }
   $ws = New-Object System.Net.WebSockets.ClientWebSocket
   $ws.Options.KeepAliveInterval = [TimeSpan]::FromSeconds(30)
   $ws.ConnectAsync([Uri]$t.webSocketDebuggerUrl, [Threading.CancellationToken]::None).Wait()
@@ -34,6 +38,7 @@ function Start-CdpSession([string]$page, [int]$Width = 1600, [int]$Height = 950,
 }
 
 function Invoke-Cdp($s, [string]$method, $params = @{}) {
+  if ($s.Ws.State -ne 'Open') { throw "CDP socket not open ($($s.Ws.State))" }
   $s.Id++
   $msg = @{ id = $s.Id; method = $method; params = $params } | ConvertTo-Json -Depth 10 -Compress
   $bytes = [Text.Encoding]::UTF8.GetBytes($msg)
@@ -42,6 +47,7 @@ function Invoke-Cdp($s, [string]$method, $params = @{}) {
   while ($true) {
     $ms = New-Object IO.MemoryStream
     do {
+      if ($s.Ws.State -ne 'Open') { throw "CDP socket closed while waiting for $method" }
       $r = $s.Ws.ReceiveAsync([ArraySegment[byte]]::new($buf), [Threading.CancellationToken]::None).Result
       $ms.Write($buf, 0, $r.Count)
     } while (-not $r.EndOfMessage)

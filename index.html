@@ -13,6 +13,7 @@
   <div class="group">
     <button data-act="open-files" title="Open image files">Open files</button>
     <button data-act="open-folder" title="Open all images in a folder">Open folder</button>
+    <button data-act="demo" title="Load an example R&amp;S RTB2004 screenshot">Load demo</button>
     <span class="hint">or drop files/folders · <kbd>Ctrl</kbd>+<kbd>V</kbd> to paste</span>
   </div>
   <div class="spacer"></div>
@@ -32,8 +33,7 @@
 
   <section class="stage">
     <div class="stage-tools">
-      <button id="tgl-calib" class="toggle" title="Show graticule & 0-level markers (O)">Calibration</button>
-      <button id="tgl-traces" class="toggle" title="Show extracted traces (T)">Traces</button>
+      <button id="tgl-overlay" class="toggle" title="Show what was detected: grid with the calibrated time/value of every division line, 0 levels, extracted curves and their band (D)">Detection overlay</button>
       <button id="tgl-labels" class="toggle" title="Show values at cursor (L)">Values</button>
       <span class="sep"></span>
       <button data-act="zoom-out" title="Zoom out (−)">−</button>
@@ -48,6 +48,7 @@
         <h2>Load scope screenshots</h2>
         <p>Drop images or folders here, paste with <kbd>Ctrl</kbd>+<kbd>V</kbd>, or</p>
         <div><button data-act="open-files">Open files</button> <button data-act="open-folder">Open folder</button></div>
+        <p>No screenshot at hand? <button data-act="demo">Load demo screenshot</button></p>
         <p class="muted">Known layouts: R&amp;S RTB2004. Other screenshots can be calibrated manually.</p>
       </div>
     </div>
@@ -83,7 +84,7 @@
     <tr><td>Double-click</td><td>Move nearest cursor to this position</td></tr>
     <tr><td>Drag empty area · wheel</td><td>Pan · zoom</td></tr>
     <tr><td><kbd>F</kbd> / <kbd>0</kbd>, <kbd>G</kbd>, <kbd>+</kbd> <kbd>−</kbd></td><td>Fit screenshot, fit graticule, zoom in/out</td></tr>
-    <tr><td><kbd>T</kbd> <kbd>O</kbd> <kbd>L</kbd></td><td>Toggle extracted traces / calibration overlay / value labels</td></tr>
+    <tr><td><kbd>D</kbd> <kbd>L</kbd></td><td>Toggle detection overlay / value labels at cursors</td></tr>
     <tr><td><kbd>C</kbd></td><td>Copy readout (tab-separated)</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>V</kbd></td><td>Paste screenshot from clipboard</td></tr>
     <tr><td><kbd>Esc</kbd></td><td>Cancel picking mode</td></tr>

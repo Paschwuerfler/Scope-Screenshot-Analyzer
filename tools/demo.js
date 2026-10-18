@@ -1,6 +1,6 @@
-// Dev helper: index.html?demo loads all sample screenshots (needs a browser started with
-// --allow-file-access-from-files when opened from file://, or any http server).
-// ?demo=N selects the N-th image (1-based) after loading.
+// Dev helper: index.html?samples replaces the session with all sample screenshots (needs a
+// browser started with --allow-file-access-from-files when opened from file://, or any http
+// server). ?samples=N selects the N-th image (1-based) after loading.
 (() => {
   const s = document.createElement('script');
   s.src = 'tools/samples.js';
@@ -17,7 +17,7 @@
     })));
     await App.docs.clear();
     await App.loaders.loadFiles(files);
-    const n = parseInt(new URLSearchParams(location.search).get('demo'), 10);
+    const n = parseInt(new URLSearchParams(location.search).get('samples'), 10);
     if (n > 0 && App.docs.list()[n - 1]) App.docs.setActive(App.docs.list()[n - 1].id);
     document.body.dataset.demoReady = '1';
     // Diagnostics for headless checks: canvas size and a pixel from its centre.

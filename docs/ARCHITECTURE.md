@@ -120,5 +120,6 @@ changes add defaults when restoring in `App.docs.restore`.
 | `synthetic_glyphs.js` | hand-drawn fallback glyphs |
 | `cdp.ps1` | Chrome DevTools Protocol helpers (PowerShell, no deps) |
 | `ui_test.ps1` | end-to-end UI smoke test incl. persistence |
-| `demo.js` | `index.html?demo=N` loads the samples (dev only) |
+| `demo.js` | `index.html?samples=N` replaces the session with the samples (dev only) |
+| `build_demo.ps1` | regenerate `js/demo_image.js` (embedded screenshot behind "Load demo" / `?demo`) |
 | `headless.ps1` | find browser, dump an element of a headless-rendered page |

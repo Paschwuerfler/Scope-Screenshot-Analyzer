@@ -47,8 +47,9 @@ Run from the project root in PowerShell (needs Edge or Chrome installed, nothing
   real UI over CDP (drag, nudge, double-click, navigate, reload/restore) and saves screenshots
   into `<folder>` so you can look at them. Extend it when you change interactions.
 - `tools\cdp.ps1` has helpers (`Start-CdpSession`, `Invoke-CdpJs`, `Send-CdpMouse`,
-  `Send-CdpKey`, `Save-CdpScreenshot`) for ad-hoc UI checks. `index.html?demo=N` loads the
-  samples and selects image N.
+  `Send-CdpKey`, `Save-CdpScreenshot`) for ad-hoc UI checks. `index.html?samples=N` replaces
+  the session with the samples and selects image N; `index.html?demo` loads the built-in demo
+  screenshot (`js/demo_image.js`, regenerate with `toolsuild_demo.ps1`).
 - If OCR glyphs or samples change: `powershell -ExecutionPolicy Bypass -File tools\build_glyphs.ps1`
   regenerates `js/ocr_glyphs.js` (never edit that file by hand).
 

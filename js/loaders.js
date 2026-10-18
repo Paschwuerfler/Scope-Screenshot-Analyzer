@@ -89,10 +89,28 @@ App.loaders = (() => {
     inp.click();
   }
 
+  /** Load the built-in demo screenshot(s) from js/demo_image.js (injected on first use). */
+  async function loadDemo() {
+    if (!App.DEMO_IMAGES) {
+      await new Promise((res, rej) => {
+        const s = document.createElement('script');
+        s.src = 'js/demo_image.js'; s.onload = res; s.onerror = () => rej(new Error('demo data missing'));
+        document.head.appendChild(s);
+      }).catch(e => App.events.emit('toast', `Could not load demo: ${e.message}`));
+      if (!App.DEMO_IMAGES) return;
+    }
+    const files = App.DEMO_IMAGES.map(d => {
+      const bin = atob(d.data), bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new File([bytes], d.name, { type: d.type });
+    });
+    await loadFiles(files);
+  }
+
   async function importSession(file) {
     try { await App.docs.importSession(file); App.events.emit('toast', `Imported session ${file.name}`); }
     catch (e) { App.events.emit('toast', `Import failed: ${e.message}`); }
   }
 
-  return { init, pick, loadFiles };
+  return { init, pick, loadFiles, loadDemo };
 })();

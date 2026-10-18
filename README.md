@@ -4,10 +4,15 @@ Measure directly on oscilloscope screenshots: the tool recognises the scope's sc
 reads timebase, position, V/div and 0 V levels per channel, extracts the traces, and gives you
 two draggable cursors with Δt, 1/Δt, V at each cursor, ΔV and slew rate (ΔV/Δt).
 
+**▶ [Try it online with a demo screenshot](https://paschwuerfler.github.io/Scope-Screenshot-Analyzer/?demo)**
+· [open empty](https://paschwuerfler.github.io/Scope-Screenshot-Analyzer/)
+
 ## Start
 
-Double-click **`index.html`** (Chrome or Edge recommended). Nothing to install, works offline.
-To use it on another computer, copy the whole folder.
+Use the online version above, or run it locally: double-click **`index.html`** (Chrome or Edge
+recommended). Nothing to install, works offline. To use it on another computer, copy the whole
+folder. Screenshots you load never leave your computer, even in the online version.
+**Load demo** loads an example R&S RTB2004 screenshot.
 
 ## Loading screenshots
 
@@ -28,7 +33,10 @@ calibration, so you can switch freely (**↑/↓** or click a thumbnail).
   it as the reading's uncertainty.
 - **Copy** (or **C**) copies the readout as tab-separated text, ready to paste into Excel.
 - Wheel = zoom, drag empty area = pan, **F** = fit screenshot, **G** = fit graticule.
-- **T** shows the extracted traces on top of the image so you can check what was detected.
+- **Detection overlay** (**D**) dims the screenshot and shows what the tool detected: every grid
+  line labelled with the time/voltage the calibration assigns to it (should match the scope's own
+  grid and labels), each channel's 0 level, the extracted curve and its band. Use it to sanity-check
+  a screenshot before trusting the numbers.
 
 ## Checking / fixing the calibration
 

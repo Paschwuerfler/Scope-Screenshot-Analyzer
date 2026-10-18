@@ -3,7 +3,7 @@
 App.ui = (() => {
   const { formatSI, formatRange, formatRate, parseSI, escapeHtml: esc } = App.util;
   const $ = sel => document.querySelector(sel);
-  const prefs = { showTraces: false, showCalib: true, showValueLabels: true };
+  const prefs = { showOverlay: false, showValueLabels: true };
 
   // ---------------------------------------------------------------- status badges
   const BADGE = { ok: ['✓', 'ok', 'Detected automatically, sources agree'], warn: ['!', 'warn', 'Uncertain — please check'], manual: ['✎', 'manual', 'Set manually'] };
@@ -175,8 +175,7 @@ App.ui = (() => {
   }
 
   function syncToggles() {
-    $('#tgl-traces').classList.toggle('on', prefs.showTraces);
-    $('#tgl-calib').classList.toggle('on', prefs.showCalib);
+    $('#tgl-overlay').classList.toggle('on', prefs.showOverlay);
     $('#tgl-labels').classList.toggle('on', prefs.showValueLabels);
   }
 

@@ -76,44 +76,89 @@ App.view = (() => {
     if (v.scale !== lastScale) { lastScale = v.scale; App.events.emit('zoom', v.scale); }
     ctx.imageSmoothingEnabled = v.scale < 2;
     ctx.drawImage(d.bitmap, v.ox, v.oy, d.width * v.scale, d.height * v.scale);
-    if (prefs().showCalib) drawCalibration(d, v);
-    if (prefs().showTraces) drawTraces(d, v);
+    if (prefs().showOverlay) drawOverlay(d, v);
     drawCursors(d, v);
     if (drag && drag.type === 'grid') drawGridDrag(v);
     if (mode && hover) drawPickHint(d, v);
   }
 
-  function drawCalibration(d, v) {
-    const g = d.calib.grid;
+  // Detection overlay (sanity check): dims the screenshot and draws what the calibration and
+  // trace extraction believe — every division line labelled with the time/value the calibration
+  // assigns to it (compare with the scope's own grid and labels), 0 levels, extracted curves and
+  // their detected band (min/max per column).
+  const OVERLAY_GRID = '#22d3ee';
+  function drawOverlay(d, v) {
+    const c = d.calib, g = c.grid;
     const [x0, y0] = toScreen(v, g.left, g.top), [x1, y1] = toScreen(v, g.right, g.bottom);
     ctx.save();
-    ctx.setLineDash([4, 4]); ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 1;
-    ctx.strokeRect(x0 + 0.5, y0 + 0.5, x1 - x0, y1 - y0);
-    ctx.setLineDash([]);
-    // 0 V markers: small triangles just inside the left grid edge
-    for (const c of App.calib.CHANNELS) {
-      const ch = d.calib.channels[c.id];
-      if (!ch || !ch.on) continue;
-      const [, sy] = toScreen(v, 0, ch.zeroY);
-      ctx.fillStyle = c.color; ctx.strokeStyle = '#000';
-      ctx.beginPath(); ctx.moveTo(x0 + 2, sy - 6); ctx.lineTo(x0 + 12, sy); ctx.lineTo(x0 + 2, sy + 6); ctx.closePath();
-      ctx.fill(); ctx.stroke();
-      ctx.globalAlpha = 0.35; ctx.strokeStyle = c.color; ctx.setLineDash([2, 4]);
-      ctx.beginPath(); ctx.moveTo(x0 + 12, sy + 0.5); ctx.lineTo(x1, sy + 0.5); ctx.stroke();
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(v.ox, v.oy, d.width * v.scale, d.height * v.scale);
+
+    // graticule: all division lines
+    ctx.strokeStyle = OVERLAY_GRID; ctx.lineWidth = 1; ctx.globalAlpha = 0.55; ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    for (let k = 0; k <= g.hdiv; k++) { const sx = Math.round(x0 + (x1 - x0) * k / g.hdiv) + 0.5; ctx.moveTo(sx, y0); ctx.lineTo(sx, y1); }
+    for (let k = 0; k <= g.vdiv; k++) { const sy = Math.round(y0 + (y1 - y0) * k / g.vdiv) + 0.5; ctx.moveTo(x0, sy); ctx.lineTo(x1, sy); }
+    ctx.stroke();
+    ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.lineWidth = 1.5;
+    ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+
+    // time labels at each vertical line (bottom, inside the grid)
+    ctx.font = '11px system-ui, sans-serif'; ctx.textBaseline = 'bottom';
+    for (let k = 0; k <= g.hdiv; k++) {
+      const ix = g.left + (g.right - g.left) * k / g.hdiv, sx = x0 + (x1 - x0) * k / g.hdiv;
+      label(App.util.formatSI(snap0(App.calib.tAt(c, ix), c.time.tdiv), 's', 4), sx + 3, y1 - 3, OVERLAY_GRID);
+    }
+    // value labels at each horizontal line, one column per distinct channel scale
+    const groups = [];
+    for (const ch of App.calib.CHANNELS) {
+      const cc = c.channels[ch.id];
+      if (!cc || !cc.on) continue;
+      const grp = groups.find(gp => gp.vdiv === cc.vdiv && Math.abs(gp.zeroY - cc.zeroY) < 0.5 && gp.unit === cc.unit);
+      if (grp) grp.ids.push(ch.id); else groups.push({ ids: [ch.id], vdiv: cc.vdiv, zeroY: cc.zeroY, unit: cc.unit, color: ch.color });
+    }
+    ctx.textBaseline = 'top';
+    groups.forEach((gp, gi) => {
+      for (let k = 0; k <= g.vdiv; k++) {
+        const iy = g.top + (g.bottom - g.top) * k / g.vdiv, sy = y0 + (y1 - y0) * k / g.vdiv;
+        const val = snap0(App.calib.vAt(c, gp.ids[0], iy), gp.vdiv);
+        label(`${k === 0 ? gp.ids.join('/') + ' ' : ''}${App.util.formatSI(val, gp.unit, 4)}`, x0 + 3 + gi * 92, sy + 2, gp.color);
+      }
+    });
+
+    // per channel: 0 level, detected band, extracted curve
+    for (const ch of App.calib.CHANNELS) {
+      const cc = c.channels[ch.id];
+      if (!cc || !cc.on) continue;
+      const [, zy] = toScreen(v, 0, cc.zeroY);
+      ctx.strokeStyle = ch.color; ctx.lineWidth = 1; ctx.setLineDash([8, 4]); ctx.globalAlpha = 0.8;
+      ctx.beginPath(); ctx.moveTo(x0, zy); ctx.lineTo(x1, zy); ctx.stroke();
       ctx.setLineDash([]); ctx.globalAlpha = 1;
+      ctx.fillStyle = ch.color; ctx.strokeStyle = '#000';
+      ctx.beginPath(); ctx.moveTo(x0 - 12, zy - 6); ctx.lineTo(x0 - 1, zy); ctx.lineTo(x0 - 12, zy + 6); ctx.closePath(); ctx.fill(); ctx.stroke();
+      const tr = d.traces && d.traces[ch.id];
+      if (!tr) continue;
+      // band: one vertical stroke per image column
+      ctx.strokeStyle = ch.color; ctx.globalAlpha = 0.28; ctx.lineWidth = Math.max(1, v.scale);
+      ctx.beginPath();
+      for (let x = 0; x < tr.lo.length; x++) {
+        if (isNaN(tr.lo[x])) continue;
+        const [sx, sa] = toScreen(v, x + 0.5, tr.lo[x]), [, sb] = toScreen(v, 0, tr.hi[x] + 1);
+        ctx.moveTo(sx, sa); ctx.lineTo(sx, sb);
+      }
+      ctx.stroke(); ctx.globalAlpha = 1;
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 3.5; path(tr, v); ctx.stroke();
+      ctx.strokeStyle = ch.color; ctx.lineWidth = 1.5; path(tr, v); ctx.stroke();
     }
     ctx.restore();
   }
-
-  function drawTraces(d, v) {
-    ctx.save();
-    ctx.lineWidth = 1.5;
-    for (const [id, tr] of Object.entries(d.traces || {})) {
-      const c = App.calib.channelById(id);
-      ctx.strokeStyle = '#000'; ctx.globalAlpha = 0.6; ctx.lineWidth = 3.5; path(tr, v); ctx.stroke();
-      ctx.strokeStyle = c.color; ctx.globalAlpha = 1; ctx.lineWidth = 1.5; path(tr, v); ctx.stroke();
-    }
-    ctx.restore();
+  // Floating-point residue like 1.9e-14 V on the 0 line -> 0.
+  const snap0 = (val, perDiv) => (Math.abs(val) < Math.abs(perDiv) * 1e-6 ? 0 : val);
+  function label(txt, x, y, color) {
+    const w = ctx.measureText(txt).width + 6;
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(x - 2, ctx.textBaseline === 'bottom' ? y - 13 : y - 1, w, 14);
+    ctx.fillStyle = color; ctx.fillText(txt, x + 1, y);
   }
   function path(tr, v) {
     ctx.beginPath();

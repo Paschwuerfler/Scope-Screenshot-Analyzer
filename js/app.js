@@ -19,8 +19,7 @@
     '+': () => App.view.zoom(1.25),
     '=': () => App.view.zoom(1.25),
     '-': () => App.view.zoom(0.8),
-    't': () => App.ui.togglePref('showTraces'),
-    'o': () => App.ui.togglePref('showCalib'),
+    'd': () => App.ui.togglePref('showOverlay'),
     'l': () => App.ui.togglePref('showValueLabels'),
     'c': e => { if (!e.ctrlKey && !e.metaKey) copyReadout(); else return false; },
     'Escape': () => App.view.setMode(null),
@@ -66,6 +65,7 @@
     click('[data-act="open-files"]', () => App.loaders.pick('files'));
     click('[data-act="open-folder"]', () => App.loaders.pick('folder'));
     click('[data-act="import"]', () => App.loaders.pick('session'));
+    click('[data-act="demo"]', () => App.loaders.loadDemo());
     click('[data-act="export"]', exportSession);
     click('[data-act="clear"]', () => { if (confirm('Remove all images from this session?')) App.docs.clear(); });
     click('[data-act="help"]', () => $('#help').showModal());
@@ -74,8 +74,7 @@
     click('[data-act="fit-grid"]', () => App.view.fitGrid());
     click('[data-act="zoom-in"]', () => App.view.zoom(1.25));
     click('[data-act="zoom-out"]', () => App.view.zoom(0.8));
-    click('#tgl-traces', () => App.ui.togglePref('showTraces'));
-    click('#tgl-calib', () => App.ui.togglePref('showCalib'));
+    click('#tgl-overlay', () => App.ui.togglePref('showOverlay'));
     click('#tgl-labels', () => App.ui.togglePref('showValueLabels'));
     click('#help [data-act="close"]', () => $('#help').close());
     window.addEventListener('keydown', onKey);
@@ -83,8 +82,14 @@
     App.ui.renderAll();
     App.docs.restore().then(() => {
       App.ui.renderAll();
-      // Dev hook: index.html?demo loads the sample screenshots (see tools/demo.js).
-      if (new URLSearchParams(location.search).has('demo')) {
+      const q = new URLSearchParams(location.search);
+      // index.html?demo loads the built-in demo screenshot (used by the README link).
+      if (q.has('demo')) {
+        history.replaceState(null, '', location.pathname); // so a reload doesn't add it again
+        App.loaders.loadDemo();
+      }
+      // Dev hook: index.html?samples=N replaces the session with all samples (see tools/demo.js).
+      if (q.has('samples')) {
         const s = document.createElement('script'); s.src = 'tools/demo.js'; document.head.appendChild(s);
       }
     });

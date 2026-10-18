@@ -1,5 +1,5 @@
 # UI smoke test: drives the real app in headless Edge/Chrome via CDP.
-# Loads the samples (?demo), drags a cursor, nudges with the keyboard, double-clicks,
+# Loads the samples (?samples), drags a cursor, nudges with the keyboard, double-clicks,
 # switches images, reloads the page and checks that everything was restored.
 # Usage:  powershell -ExecutionPolicy Bypass -File tools\ui_test.ps1 [-ShotDir <folder>]
 param([string]$ShotDir = '')
@@ -17,7 +17,7 @@ $cursorPosJs = @'
   return [r.left + v.ox + x * v.scale, r.top + v.oy + (g.top + g.bottom) / 2 * v.scale]; })
 '@
 
-$sess = Start-CdpSession 'index.html?demo=4'
+$sess = Start-CdpSession 'index.html?samples=4'
 try {
   Wait-Cdp $sess 'document.body.dataset.demoReady === "1" && App.docs.list().length === 5 && App.docs.active()' 60
   Check 'demo loaded' $true
@@ -65,7 +65,7 @@ try {
 
   # --- reload: session restored from IndexedDB
   Start-Sleep -Milliseconds 800   # let debounced save run
-  # navigate to the plain URL (a reload would keep ?demo and re-import the samples)
+  # navigate to the plain URL (a reload would keep ?samples and re-import the samples)
   $plain = Invoke-CdpJs $sess 'location.href.split("?")[0]'
   Invoke-Cdp $sess 'Page.navigate' @{ url = $plain } | Out-Null
   Start-Sleep -Milliseconds 500
