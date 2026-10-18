@@ -15,9 +15,13 @@ App.measure = (() => {
     return { t: Float64Array.from(t), v: Float64Array.from(v) };
   }
 
-  /** Value of channel at image column x: {v, vLo, vHi} or null. vLo/vHi = vertical extent in that column. */
-  function valueAtX(doc, chId, x) {
-    const p = App.traces.yAt(doc.traces && doc.traces[chId], x);
+  /**
+   * Value of channel at image column x: {v, vMin, vMax} or null (vMin/vMax = displayed band).
+   * alt = true reads the second branch of a split persistence trace.
+   */
+  function valueAtX(doc, chId, x, alt = false) {
+    const tr = doc.traces && doc.traces[chId];
+    const p = App.traces.yAt(tr && (alt ? tr.alt : tr), x);
     if (!p) return null;
     const c = doc.calib;
     return { v: C.vAt(c, chId, p.mid), vMin: C.vAt(c, chId, p.hi), vMax: C.vAt(c, chId, p.lo) };
@@ -25,7 +29,8 @@ App.measure = (() => {
 
   /**
    * Readout for the two vertical cursors.
-   * Returns { t1, t2, dt, freq, channels: [{id, unit, v1, v2, dv, slope}] }.
+   * Returns { t1, t2, dt, freq, channels: [{id, alt, unit, v1, v2, dv, slope, a, b}] }.
+   * A channel whose persistence trace splits gets a second entry with alt = true.
    */
   function cursorReadout(doc) {
     const c = doc.calib, cur = doc.cursors;
@@ -34,10 +39,15 @@ App.measure = (() => {
     for (const ch of C.CHANNELS) {
       const cc = c.channels[ch.id];
       if (!cc || !cc.on) continue;
-      const a = valueAtX(doc, ch.id, cur.x1), b = valueAtX(doc, ch.id, cur.x2);
-      const v1 = a ? a.v : null, v2 = b ? b.v : null;
-      const dv = v1 !== null && v2 !== null ? v2 - v1 : null;
-      channels.push({ id: ch.id, unit: cc.unit || 'V', v1, v2, dv, slope: dv !== null && dt !== 0 ? dv / dt : null, a, b });
+      const entry = alt => {
+        const a = valueAtX(doc, ch.id, cur.x1, alt), b = valueAtX(doc, ch.id, cur.x2, alt);
+        const v1 = a ? a.v : null, v2 = b ? b.v : null;
+        const dv = v1 !== null && v2 !== null ? v2 - v1 : null;
+        return { id: ch.id, alt, unit: cc.unit || 'V', v1, v2, dv, slope: dv !== null && dt !== 0 ? dv / dt : null, a, b };
+      };
+      channels.push(entry(false));
+      const tr = doc.traces && doc.traces[ch.id];
+      if (tr && tr.alt) { const e = entry(true); if (e.a || e.b) channels.push(e); }
     }
     return { t1, t2, dt, freq: dt !== 0 ? 1 / Math.abs(dt) : null, channels };
   }

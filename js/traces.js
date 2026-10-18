@@ -43,8 +43,7 @@ App.traces = (() => {
       if (!ch || !ch.on) continue;
       if (calib.persistence && calib.persistChannel === c.id) {
         const isHeat = i => sat[i] >= 0.4 && val[i] >= 0.3 && (hue[i] <= 240 || hue[i] >= 300);
-        const tr = trackRuns(box, isHeat);
-        out[c.id] = finish(tr, (x, r) => hottestCentre(box, x, r, i => isHeat(i) ? heat(hue[i]) : -1));
+        out[c.id] = persistenceTrace(box, trackRuns(box, isHeat), i => (isHeat(i) ? heat(hue[i]) : -1));
       } else {
         const match = i => sat[i] >= c.minSat && val[i] >= 0.25 && hue[i] >= c.hue[0] && hue[i] <= c.hue[1];
         const tr = trackRuns(box, match);
@@ -139,12 +138,86 @@ App.traces = (() => {
     return 1 - h / 240;
   }
 
-  function hottestCentre({ W }, x, r, score) {
-    let maxH = -1;
-    for (let y = r.a; y <= r.b; y++) maxH = Math.max(maxH, score(y * W + x));
-    let sy = 0, n = 0;
-    for (let y = r.a; y <= r.b; y++) if (score(y * W + x) >= maxH - 0.08) { sy += y; n++; }
-    return n ? sy / n : (r.a + r.b) / 2;
+  // ---------------------------------------------------------------- persistence
+  // The trace is the best continuous path through the heat map (dynamic programming over
+  // columns: maximise sum of heat² along the path minus a small cost per px of vertical
+  // movement). Unlike a per-column "hottest pixel" rule this never averages between two
+  // ridges and carries through faint columns. A second pass with the first path masked out
+  // finds a second branch where the waveform population splits (kept as `alt`).
+  const EMPTY = -0.05;   // score of a pixel without trace colour
+  const STEP = 0.04;     // cost per px of vertical movement between columns
+  const MASK_R = 5;      // px around the first path excluded from the second pass
+
+  function persistenceTrace(box, { chosen }, heatAt) {
+    const { W, width, x0, x1, y0, y1 } = box;
+    const hasHeat = new Uint8Array(width);
+    for (let x = x0; x <= x1; x++) hasHeat[x] = chosen[x] ? 1 : 0;
+    const score = (x, y) => { const h = heatAt(y * W + x); return h < 0 ? EMPTY : 0.05 + h * h; };
+
+    const p1 = ridgePath(box, hasHeat, score);
+    const tr = pathTrace(box, p1, hasHeat, chosen, heatAt);
+    const p2 = ridgePath(box, hasHeat, (x, y) => (Math.abs(y - p1[x]) <= MASK_R ? EMPTY : score(x, y)));
+    tr.alt = altTrace(box, p1, p2, hasHeat, heatAt);
+    return tr;
+  }
+
+  /** Viterbi over columns with L1 transition cost (two-pass distance transform, O(W·H)). */
+  function ridgePath({ width, x0, x1, y0, y1 }, hasHeat, score) {
+    const H = y1 - y0 + 1, nx = x1 - x0 + 1;
+    let D = new Float32Array(H), N = new Float32Array(H);
+    const f = new Float32Array(H), arg = new Int32Array(H), back = new Int16Array(nx * H);
+    for (let x = x0; x <= x1; x++) {
+      for (let y = 0; y < H; y++) { f[y] = D[y]; arg[y] = y; }
+      for (let y = 1; y < H; y++) if (f[y - 1] - STEP > f[y]) { f[y] = f[y - 1] - STEP; arg[y] = arg[y - 1]; }
+      for (let y = H - 2; y >= 0; y--) if (f[y + 1] - STEP > f[y]) { f[y] = f[y + 1] - STEP; arg[y] = arg[y + 1]; }
+      const off = (x - x0) * H;
+      for (let y = 0; y < H; y++) { N[y] = f[y] + (hasHeat[x] ? score(x, y + y0) : 0); back[off + y] = arg[y]; }
+      [D, N] = [N, D];
+    }
+    let y = 0;
+    for (let k = 1; k < H; k++) if (D[k] > D[y]) y = k;
+    const path = new Float32Array(width).fill(NaN);
+    for (let x = x1; x >= x0; x--) { path[x] = y + y0; y = back[(x - x0) * H + y]; }
+    return path;
+  }
+
+  /** Refine a path to a heat-weighted centre (±3 px) and attach the column envelope as lo/hi. */
+  function pathTrace({ W, width, x0, x1 }, path, hasHeat, chosen, heatAt) {
+    const mid = new Float32Array(width).fill(NaN), lo = new Float32Array(width).fill(NaN), hi = new Float32Array(width).fill(NaN);
+    let found = 0;
+    for (let x = x0; x <= x1; x++) {
+      if (!hasHeat[x]) continue;
+      const py = path[x];
+      let sw = 0, sy = 0;
+      for (let y = py - 3; y <= py + 3; y++) { const h = heatAt(y * W + x); if (h >= 0) { const w = 0.05 + h * h; sw += w; sy += w * y; } }
+      mid[x] = sw ? sy / sw : py;
+      const r = chosen[x];
+      lo[x] = Math.min(r.a, mid[x]); hi[x] = Math.max(r.b, mid[x]); found++;
+    }
+    return { mid, raw: mid, lo, hi, blockW: 1, found };
+  }
+
+  /** Second branch: only columns where it is hot and clearly apart from the first path. */
+  function altTrace(box, p1, p2, hasHeat, heatAt) {
+    const { W, width, x0, x1 } = box;
+    const ok = new Uint8Array(width);
+    for (let x = x0; x <= x1; x++)
+      ok[x] = hasHeat[x] && Math.abs(p2[x] - p1[x]) > MASK_R + 2 && heatAt(p2[x] * W + x) >= 0.45 ? 1 : 0;
+    // drop short fragments
+    for (let x = x0; x <= x1;) {
+      if (!ok[x]) { x++; continue; }
+      let e = x; while (e <= x1 && ok[e]) e++;
+      if (e - x < 15) ok.fill(0, x, e);
+      x = e;
+    }
+    let n = 0;
+    const mid = new Float32Array(width).fill(NaN), lo = new Float32Array(width).fill(NaN), hi = new Float32Array(width).fill(NaN);
+    for (let x = x0; x <= x1; x++) if (ok[x]) {
+      let sw = 0, sy = 0;
+      for (let y = p2[x] - 3; y <= p2[x] + 3; y++) { const h = heatAt(y * W + x); if (h >= 0) { const w = 0.05 + h * h; sw += w; sy += w * y; } }
+      mid[x] = lo[x] = hi[x] = sw ? sy / sw : p2[x]; n++;
+    }
+    return n >= 30 ? { mid, raw: mid, lo, hi, blockW: 1, found: n } : null;
   }
 
   /**

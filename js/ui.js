@@ -38,7 +38,7 @@ App.ui = (() => {
     const ro = App.measure.cursorReadout(d);
     const C = App.view.CURSOR_COLORS;
     const sel = d.cursors.sel;
-    const val = (x, unit) => x ? `<span class="v">${formatSI(x.v, unit, 4)}</span><span class="band" title="Displayed band (trace thickness / sample block / persistence spread)">${formatRange(x.vMin, x.vMax, unit)}</span>` : '<span class="v muted">no trace</span>';
+    const val = (x, unit) => x ? `<span class="v">${formatSI(x.v, unit, 4)}</span>${x.vMax - x.vMin > 1e-12 ? `<span class="band" title="Displayed band (trace thickness / sample block / persistence spread)">${formatRange(x.vMin, x.vMax, unit)}</span>` : ''}` : '<span class="v muted">no trace</span>';
     let rows = `
       <tr><th></th><th><button class="cur-tag ${sel === 1 ? 'sel' : ''}" data-cursor="1" style="--c:${C[1]}">1</button></th>
           <th><button class="cur-tag ${sel === 2 ? 'sel' : ''}" data-cursor="2" style="--c:${C[2]}">2</button></th><th>Δ (2−1)</th></tr>
@@ -47,7 +47,7 @@ App.ui = (() => {
     for (const c of ro.channels) {
       const col = App.calib.channelById(c.id).color;
       rows += `
-      <tr class="ch-row"><td class="lbl"><span class="chip" style="--c:${col}">${c.id}</span></td>
+      <tr class="ch-row ${c.alt ? 'alt' : ''}"><td class="lbl"><span class="chip ${c.alt ? 'hollow' : ''}" style="--c:${col}" ${c.alt ? 'title="Second branch: the persistence display splits into two waveform populations here"' : ''}>${c.id}${c.alt ? ' ②' : ''}</span></td>
         <td>${val(c.a, c.unit)}</td><td>${val(c.b, c.unit)}</td><td class="strong">${formatSI(c.dv, c.unit)}</td></tr>
       <tr class="slope-row"><td class="lbl">ΔV/Δt</td><td colspan="2"></td><td class="strong">${formatRate(c.slope, c.unit)}</td></tr>`;
     }
@@ -59,7 +59,8 @@ App.ui = (() => {
     const ro = App.measure.cursorReadout(d);
     const head = ['image', 't1 [s]', 't2 [s]', 'dt [s]', '1/dt [Hz]'], vals = [d.name, ro.t1, ro.t2, ro.dt, ro.freq];
     ro.channels.forEach(c => {
-      head.push(`${c.id} v1 [${c.unit}]`, `${c.id} v2 [${c.unit}]`, `${c.id} dv [${c.unit}]`, `${c.id} dv/dt [${c.unit}/s]`);
+      const n = c.alt ? `${c.id} branch2` : c.id;
+      head.push(`${n} v1 [${c.unit}]`, `${n} v2 [${c.unit}]`, `${n} dv [${c.unit}]`, `${n} dv/dt [${c.unit}/s]`);
       vals.push(c.v1, c.v2, c.dv, c.slope);
     });
     const f = x => typeof x === 'number' ? (isFinite(x) ? x.toPrecision(6) : '') : x === null ? '' : String(x);

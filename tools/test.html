@@ -71,6 +71,12 @@ function loadImg(src) {
     const fmt = val => val ? `${val.v.toFixed(2)} (band ${val.vMin.toFixed(1)}..${val.vMax.toFixed(1)})` : '–';
     check('cursor V1', ch && within(ch.a, s.scopeCursor.v1), `${fmt(ch && ch.a)} expected ${s.scopeCursor.v1}`);
     check('cursor V2', ch && within(ch.b, s.scopeCursor.v2), `${fmt(ch && ch.b)} expected ${s.scopeCursor.v2}`);
+    if (s.persistence) {
+      const tr = traces[s.scopeCursor.ch], altN = tr && tr.alt ? tr.alt.found : 0;
+      check('split branch', s.split ? altN >= 100 : altN === 0, `second branch: ${altN} columns`);
+      // where the cursor is not on a near-vertical edge, the centre value itself must be close
+      check('cursor V1 centre', ch && ch.a && Math.abs(ch.a.v - s.scopeCursor.v1) <= 1.5, `error ${ch && ch.a ? (ch.a.v - s.scopeCursor.v1).toFixed(2) : '–'} V`);
+    }
     for (const [id, tr] of Object.entries(traces)) lines.push(`  trace ${id}: ${tr.found} columns`);
     lines.push(`  time: analyze ${(t1 - t0).toFixed(0)} ms, traces ${(t2 - t1).toFixed(0)} ms`);
   }

@@ -52,7 +52,7 @@ A **doc** is one loaded screenshot (`js/state.js`):
 }
 ```
 
-`traces[ch]` = `{ mid, raw, lo, hi, blockW, found }`. `mid`/`lo`/`hi` are Float32Arrays indexed
+`traces[ch]` = `{ mid, raw, lo, hi, blockW, found, alt? }` (`alt`: second branch of a split persistence trace, same shape). `mid`/`lo`/`hi` are Float32Arrays indexed
 by image x (NaN = no trace in that column). `mid` is smoothed over one sample block.
 
 ## Coordinate systems
@@ -91,8 +91,15 @@ by image x (NaN = no trace in that column). `mid` is smoothed over one sample bl
    lines and the hollow sample blocks the RTB draws at fast timebases).
 3. Track the trace from the largest run outward, picking the run nearest to the previous one
    (rejects labels, markers, cursor numbers).
-4. y per column = run centre (persistence: centre of the hottest pixels). Detect the sample block
-   width and box-filter over it (= linear interpolation between sample centres).
+4. Normal traces: y per column = run centre; detect the sample block width and box-filter over it
+   (= linear interpolation between sample centres).
+   Persistence: the trace is the best continuous path through the heat map, found by dynamic
+   programming over columns (score = heat², small cost per px of vertical movement, so detours
+   to hot-coloured labels don't pay off while real edges cost every path the same). It never
+   averages between two ridges. A second pass with the first path masked finds a second branch
+   where the waveform population splits; it is kept as `trace.alt` (only hot, ≥ 15-column
+   segments clearly apart from the main path) and shown as "C4 ②" in the readout and dashed
+   in the detection overlay. Tuning constants: `EMPTY`, `STEP`, `MASK_R` in `traces.js`.
 5. `yAt(trace, x)` returns `mid` plus the band `lo..hi` over one block, which the UI shows as uncertainty.
 
 Accuracy on the samples: the scope's own cursor readouts lie within ~1.5 V (10 V/div) of the

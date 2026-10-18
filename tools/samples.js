@@ -11,6 +11,8 @@
 //                   of the layout (see js/layouts/rtb2004.js REGIONS)
 //   bottom        : exact text of the V/div field of each active channel's bottom-bar box
 //   scopeCursor   : the scope's own cursor readout, used to verify our measurement chain
+//   split         : persistence only — true if the waveform population visibly splits into two
+//                   branches (expects a second trace branch `alt` with >= 100 columns)
 window.SAMPLES = [
   {
     file: 'rtb2004_rise_c1c3_5ns.png', layout: 'rtb2004', tdiv: 5e-9, pos: 20e-9, persistence: false,
@@ -34,14 +36,14 @@ window.SAMPLES = [
     scopeCursor: { ch: 'C3', t1: -1.2e-9, t2: 1.25e-9, v1: 40.43, v2: 10.059 },
   },
   {
-    file: 'rtb2004_rise_c4_persist_10ns.png', layout: 'rtb2004', tdiv: 10e-9, pos: 38e-9, persistence: true,
+    file: 'rtb2004_rise_c4_persist_10ns.png', layout: 'rtb2004', tdiv: 10e-9, pos: 38e-9, persistence: true, split: false,
     channels: { C4: { vdiv: 10, zeroY: 583.2 } }, selected: 'C4',
     header: { timebase: '10 ns/', position: '38 ns', trigLevel: '28.6 V', sampleRate: '2.5 GSa/s', trigMode: 'Auto', acqState: 'Complete', acqMode: 'Sample' },
     bottom: { C4: '10 v/' },
     scopeCursor: { ch: 'C4', t1: -7e-9, t2: 0.4e-9, v1: 5.5664, v2: 35.449 },
   },
   {
-    file: 'rtb2004_rise_c4_persist_40ns.png', layout: 'rtb2004', tdiv: 40e-9, pos: 8e-9, persistence: true,
+    file: 'rtb2004_rise_c4_persist_40ns.png', layout: 'rtb2004', tdiv: 40e-9, pos: 8e-9, persistence: true, split: true,
     channels: { C4: { vdiv: 10, zeroY: 583.2 } }, selected: 'C4',
     header: { timebase: '40 ns/', position: '8 ns', trigLevel: '18.8 V', sampleRate: '2.5 GSa/s', trigMode: 'Auto', acqState: 'Complete', acqMode: 'Sample' },
     bottom: { C4: '10 v/' },

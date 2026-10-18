@@ -149,6 +149,12 @@ App.view = (() => {
       ctx.stroke(); ctx.globalAlpha = 1;
       ctx.strokeStyle = '#000'; ctx.lineWidth = 3.5; path(tr, v); ctx.stroke();
       ctx.strokeStyle = ch.color; ctx.lineWidth = 1.5; path(tr, v); ctx.stroke();
+      if (tr.alt) {   // second branch of a split persistence trace: dashed
+        ctx.setLineDash([5, 3]);
+        ctx.strokeStyle = '#000'; ctx.lineWidth = 3.5; path(tr.alt, v); ctx.stroke();
+        ctx.strokeStyle = ch.color; ctx.lineWidth = 1.5; path(tr.alt, v); ctx.stroke();
+        ctx.setLineDash([]);
+      }
     }
     ctx.restore();
   }
@@ -201,7 +207,7 @@ App.view = (() => {
         const syLo = toScreen(v, 0, App.calib.yAt(d.calib, chr.id, val.vMax))[1], syHi = toScreen(v, 0, App.calib.yAt(d.calib, chr.id, val.vMin))[1];
         ctx.strokeStyle = c.color; ctx.lineWidth = 3; ctx.globalAlpha = 0.5;
         ctx.beginPath(); ctx.moveTo(sx, syLo); ctx.lineTo(sx, syHi); ctx.stroke(); ctx.globalAlpha = 1;
-        ctx.fillStyle = c.color; ctx.strokeStyle = '#000'; ctx.lineWidth = 1.5;
+        ctx.fillStyle = chr.alt ? '#000' : c.color; ctx.strokeStyle = chr.alt ? c.color : '#000'; ctx.lineWidth = chr.alt ? 2 : 1.5;
         ctx.beginPath(); ctx.arc(sx, sy, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
         if (prefs().showValueLabels) {
           const txt = App.util.formatSI(val.v, chr.unit, 3);
