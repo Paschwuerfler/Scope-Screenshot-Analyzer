@@ -57,7 +57,9 @@
 
   <aside class="panel">
     <section class="card">
-      <div class="card-head"><h3>Cursors</h3><button data-act="copy" class="small" title="Copy readout as tab-separated text (C)">Copy</button></div>
+      <div class="card-head"><h3>Cursors</h3><span class="card-btns">
+        <button id="tgl-periods" data-act="periods" class="small toggle" title="Multi-period mode: put the cursors on two adjacent peaks, switch on, then drag cursor 2 to a later peak. Dashed marks show where the peaks in between should be; frequency = N / Δt (P)">Multi-period</button>
+        <button data-act="copy" class="small" title="Copy readout as tab-separated text (C)">Copy</button></span></div>
       <div id="readout"></div>
       <p class="tip muted">Drag the lines · double-click to move the nearest · <kbd>←</kbd><kbd>→</kbd> nudge (<kbd>Shift</kbd> ×10, <kbd>Alt</kbd> ¼ px)</p>
     </section>
@@ -86,6 +88,7 @@
     <tr><td><kbd>F</kbd> / <kbd>0</kbd>, <kbd>G</kbd>, <kbd>+</kbd> <kbd>−</kbd></td><td>Fit screenshot, fit graticule, zoom in/out</td></tr>
     <tr><td><kbd>D</kbd> <kbd>L</kbd></td><td>Toggle detection overlay / value labels at cursors</td></tr>
     <tr><td><kbd>C</kbd></td><td>Copy readout (tab-separated)</td></tr>
+    <tr><td><kbd>P</kbd>, <kbd>,</kbd> <kbd>.</kbd></td><td>Multi-period mode on/off, one period less / more</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>V</kbd></td><td>Paste screenshot from clipboard</td></tr>
     <tr><td><kbd>F2</kbd></td><td>Rename current image (or double-click its name)</td></tr>
     <tr><td><kbd>Esc</kbd></td><td>Cancel picking mode</td></tr>

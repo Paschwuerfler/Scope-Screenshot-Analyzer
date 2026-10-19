@@ -34,6 +34,17 @@ double-click its name, use the ✎ button on the thumbnail, or press **F2**
   actually shows (trace thickness, sample blocks at fast timebases, persistence spread). Treat
   it as the reading's uncertainty.
 - **Copy** (or **C**) copies the readout as tab-separated text, ready to paste into Excel.
+- **Multi-period** (**P**) measures ringing frequency over several cycles:
+  1. Put the cursors on two adjacent peaks, then switch on **Multi-period**. That spacing becomes the reference period.
+  2. Drag cursor 2 to a later peak. The tool counts the periods N in between and draws N−1
+     numbered dashed lines, evenly spaced. If they all sit on peaks, the frequency is constant.
+  3. The panel shows N, the period T = Δt/N and the frequency **N/Δt**. This is about N times more
+     precise than reading one period. If N is counted wrong, correct it with **−/+** (or **,** / **.**).
+  4. For each channel, **amplitude** is (max − min)/2 within each cycle, averaged over the N cycles.
+     The grey range below it shows the smallest and largest cycle, so you can see the decay.
+  
+  The mode is saved per image. Click the button again (or **P**) to switch it off. Moving
+  cursor 1 to another cycle also switches it off.
 - Wheel = zoom, drag empty area = pan, **F** = fit screenshot, **G** = fit graticule.
 - **Detection overlay** (**D**) dims the screenshot and shows what the tool detected: every grid
   line labelled with the time/voltage the calibration assigns to it (should match the scope's own

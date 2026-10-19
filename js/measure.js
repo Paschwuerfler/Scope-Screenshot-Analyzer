@@ -49,8 +49,56 @@ App.measure = (() => {
       const tr = doc.traces && doc.traces[ch.id];
       if (tr && tr.alt) { const e = entry(true); if (e.a || e.b) channels.push(e); }
     }
-    return { t1, t2, dt, freq: dt !== 0 ? 1 / Math.abs(dt) : null, channels };
+    const ro = { t1, t2, dt, freq: dt !== 0 ? 1 / Math.abs(dt) : null, channels };
+    ro.periods = periodReadout(doc, ro);
+    return ro;
   }
 
-  return { traceToSeries, valueAtX, cursorReadout };
+  // ---- multi-period mode (ringing frequency over several cycles)
+  // doc.cursors.periods = { p0, x1 } | null: p0 = reference period in image px (the cursor
+  // spacing when the mode was switched on, refined by setPeriodCount), x1 = cursor 1 anchor.
+
+  /** Number of whole periods between the cursors (>= 1), or 0 when the mode is off. */
+  function periodCount(doc) {
+    const p = doc.cursors.periods;
+    if (!p || !(p.p0 > 0)) return 0;
+    return Math.max(1, Math.round(Math.abs(doc.cursors.x2 - doc.cursors.x1) / p.p0));
+  }
+
+  /** Image-px positions of the N-1 evenly spaced marks between the cursors. */
+  function periodMarks(doc) {
+    const n = periodCount(doc), { x1, x2 } = doc.cursors, out = [];
+    for (let k = 1; k < n; k++) out.push(x1 + (x2 - x1) * k / n);
+    return out;
+  }
+
+  /**
+   * Readout in multi-period mode, or null: { n, period, freq, channels: [{id, alt, unit, amp, ampMin,
+   * ampMax, pp, cycles}] }. Amplitude = (max − min) / 2 of the trace centre line within each of
+   * the N cycles, averaged; ampMin/ampMax = smallest/largest cycle (shows decay).
+   */
+  function periodReadout(doc, ro) {
+    const n = periodCount(doc);
+    if (!n) return null;
+    const { x1, x2 } = doc.cursors, xa = Math.min(x1, x2), w = Math.abs(x2 - x1) / n;
+    const channels = ro.channels.map(c => {
+      const cycles = [];
+      for (let k = 0; k < n; k++) {
+        let lo = Infinity, hi = -Infinity;
+        const s = Math.ceil(xa + k * w), e = Math.floor(xa + (k + 1) * w);
+        for (let x = s; x <= e; x++) {
+          const p = valueAtX(doc, c.id, x, c.alt);
+          if (p) { if (p.v < lo) lo = p.v; if (p.v > hi) hi = p.v; }
+        }
+        if (hi >= lo) cycles.push(hi - lo);
+      }
+      if (!cycles.length) return { id: c.id, alt: c.alt, unit: c.unit, amp: null, ampMin: null, ampMax: null, pp: null, cycles };
+      const pp = cycles.reduce((a, b) => a + b, 0) / cycles.length;
+      return { id: c.id, alt: c.alt, unit: c.unit, amp: pp / 2, ampMin: Math.min(...cycles) / 2, ampMax: Math.max(...cycles) / 2, pp, cycles };
+    });
+    const adt = Math.abs(ro.dt);
+    return { n, period: adt / n, freq: adt ? n / adt : null, channels };
+  }
+
+  return { traceToSeries, valueAtX, cursorReadout, periodCount, periodMarks };
 })();

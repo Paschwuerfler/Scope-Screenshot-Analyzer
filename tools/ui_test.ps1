@@ -83,6 +83,44 @@ try {
   $inp = Invoke-CdpJs $sess '!!document.querySelector(".thumb-rename")'
   Check 'F2 + Esc cancels rename' (($nm2 -eq 'renamed shot') -and -not $inp) "name=$nm2"
   if ($ShotDir) { Save-CdpScreenshot $sess (Join-Path $ShotDir 'ui_renamed.png') }
+
+  # --- multi-period mode on the ringing sample (image 1)
+  $id1 = Invoke-CdpJs $sess 'App.docs.list()[0].id'
+  Invoke-CdpJs $sess "App.docs.setActive('$id1')" | Out-Null
+  Send-CdpKey $sess 'g' 'KeyG' 71
+  # ringing peaks of C1 (local minima of y) in the right 60 % of the grid
+  $pk = Invoke-CdpJs $sess @'
+(() => { const d = App.docs.active(), m = d.traces.C1.mid, g = d.calib.grid, out = [];
+  for (let x = Math.round(g.left + 0.4 * (g.right - g.left)); x < g.right - 30; x++) {
+    let ok = !isNaN(m[x]);
+    for (let k = -30; ok && k <= 30; k++) if (k && m[x + k] < m[x]) ok = false;
+    if (ok && (!out.length || x - out[out.length - 1] > 30)) out.push(x);
+  }
+  return out; })()
+'@
+  Invoke-CdpJs $sess "(() => { const d = App.docs.active(); d.cursors.x1 = $($pk[0]); d.cursors.x2 = $($pk[1]); App.docs.touch(d); })()" | Out-Null
+  $bp = Invoke-CdpJs $sess '(() => { const r = document.getElementById("tgl-periods").getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()'
+  Send-CdpMouse $sess 'mousePressed' $bp[0] $bp[1]; Send-CdpMouse $sess 'mouseReleased' $bp[0] $bp[1]
+  # drag cursor 2 from peak 1 to peak 3 (screen px)
+  $p = Invoke-CdpJs $sess "($cursorPosJs)(2)"
+  $sc = Invoke-CdpJs $sess 'App.docs.active().view.scale'
+  $tx = $p[0] + ($pk[3] - $pk[1]) * $sc
+  Send-CdpMouse $sess 'mouseMoved' $p[0] $p[1]; Send-CdpMouse $sess 'mousePressed' $p[0] $p[1]
+  for ($k = 1; $k -le 8; $k++) { Send-CdpMouse $sess 'mouseMoved' ($p[0] + ($tx - $p[0]) * $k / 8) $p[1] }
+  Send-CdpMouse $sess 'mouseReleased' $tx $p[1]
+  $pr = Invoke-CdpJs $sess '(() => { const d = App.docs.active(), r = App.measure.cursorReadout(d); return { n: r.periods && r.periods.n, f: r.periods && r.periods.freq, dt: r.dt, amp: r.periods && r.periods.channels[0].amp, marks: App.measure.periodMarks(d), on: document.getElementById("tgl-periods").classList.contains("on") }; })()'
+  $markErr = [math]::Max([math]::Abs($pr.marks[0] - $pk[1]), [math]::Abs($pr.marks[1] - $pk[2]))
+  Check 'multi-period: N, marks on peaks, f = N/dt' (($pr.n -eq 3) -and $pr.on -and ($markErr -lt 6) -and ([math]::Abs($pr.f * [math]::Abs($pr.dt) - 3) -lt 1e-9) -and ($pr.amp -gt 0)) ("N={0} mark err {1:N1} px f={2:N0} Hz amp={3:N2}" -f $pr.n, $markErr, $pr.f, $pr.amp)
+  if ($ShotDir) { Start-Sleep -Milliseconds 200; Save-CdpScreenshot $sess (Join-Path $ShotDir 'ui_periods.png') }
+  Send-CdpKey $sess '.' 'Period' 190
+  $n4 = Invoke-CdpJs $sess 'App.measure.periodCount(App.docs.active())'
+  Send-CdpKey $sess ',' 'Comma' 188
+  $n3 = Invoke-CdpJs $sess 'App.measure.periodCount(App.docs.active())'
+  Check 'multi-period: . and , step N' (($n4 -eq 4) -and ($n3 -eq 3)) "$n4 then $n3"
+  Send-CdpKey $sess '1' 'Digit1' 49
+  Send-CdpKey $sess 'ArrowRight' 'ArrowRight' 39 8
+  $still = Invoke-CdpJs $sess '!!App.docs.active().cursors.periods'
+  Check 'multi-period: small cursor-1 nudge keeps mode' $still
   Invoke-CdpJs $sess "App.docs.setActive('$id4')" | Out-Null
 
   # --- reload: session restored from IndexedDB
@@ -97,6 +135,13 @@ try {
   Check 'reload restores session' (($rid -eq $id4) -and ([math]::Abs($rx - $x2) -lt 0.01)) "active=$rid x1=$rx"
   $rn = Invoke-CdpJs $sess "App.docs.get('$idRen') && App.docs.get('$idRen').name"
   Check 'reload keeps renamed image' ($rn -eq 'renamed shot') "name=$rn"
+  Invoke-CdpJs $sess "App.docs.setActive('$id1')" | Out-Null
+  $rn3 = Invoke-CdpJs $sess 'App.measure.periodCount(App.docs.active())'
+  Check 'reload keeps multi-period mode' ($rn3 -eq 3) "N=$rn3"
+  $half = Invoke-CdpJs $sess 'App.docs.active().cursors.periods.p0 * 0.6'
+  Invoke-CdpJs $sess "App.view.nudge($half)" | Out-Null
+  $off = Invoke-CdpJs $sess '!App.docs.active().cursors.periods && !document.getElementById("tgl-periods").classList.contains("on")'
+  Check 'moving cursor 1 to another cycle ends multi-period mode' $off
   if ($ShotDir) { Start-Sleep -Milliseconds 300; Save-CdpScreenshot $sess (Join-Path $ShotDir 'ui_restored.png') }
 } finally { Stop-CdpSession $sess }
 

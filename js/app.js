@@ -22,6 +22,9 @@
     'd': () => App.ui.togglePref('showOverlay'),
     'l': () => App.ui.togglePref('showValueLabels'),
     'c': e => { if (!e.ctrlKey && !e.metaKey) copyReadout(); else return false; },
+    'p': () => App.view.togglePeriods(),
+    ',': () => App.view.stepPeriods(-1),
+    '.': () => App.view.stepPeriods(1),
     'F2': () => App.ui.startRename(),
     'Escape': () => App.view.setMode(null),
     '?': () => $('#help').showModal(),
@@ -71,6 +74,7 @@
     click('[data-act="clear"]', () => { if (confirm('Remove all images from this session?')) App.docs.clear(); });
     click('[data-act="help"]', () => $('#help').showModal());
     click('[data-act="copy"]', copyReadout);
+    click('[data-act="periods"]', () => App.view.togglePeriods());
     click('[data-act="fit"]', () => App.view.fit());
     click('[data-act="fit-grid"]', () => App.view.fitGrid());
     click('[data-act="zoom-in"]', () => App.view.zoom(1.25));

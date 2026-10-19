@@ -4,7 +4,8 @@
 //   { id, name, kind: 'image', blob, width, height, addedAt,
 //     layoutId, layoutName,             // null = unknown layout (manual calibration)
 //     calib, status, notes, raw,        // see js/calibrate.js; status values 'ok'|'warn'|'manual'
-//     cursors: { x1, x2, sel } }        // cursor x positions in image px, sel = 1|2 (keyboard target)
+//     cursors: { x1, x2, sel, periods } } // cursor x positions in image px, sel = 1|2 (keyboard target),
+//                                       // periods = multi-period mode {p0, x1} or null (js/measure.js)
 // and runtime-only fields (rebuilt on load, never saved):
 //   { bitmap, imgData, traces, thumbUrl }
 //

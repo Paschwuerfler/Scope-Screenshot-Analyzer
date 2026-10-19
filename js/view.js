@@ -8,6 +8,7 @@
 //         double-click = move nearest cursor here | pick modes (zero level, grid) via setMode()
 App.view = (() => {
   const CURSOR_COLORS = { 1: '#22d3ee', 2: '#f472b6' };
+  const PERIOD_COLOR = '#e5e7eb';   // multi-period marks
   const HIT_PX = 8;
   let canvas, ctx, dpr = 1;
   let mode = null;            // null | {type:'pick-zero', ch} | {type:'pick-grid'}
@@ -184,6 +185,21 @@ App.view = (() => {
     const ro = App.measure.cursorReadout(d);
     ctx.save();
     ctx.font = '12px system-ui, sans-serif'; ctx.textBaseline = 'middle';
+    // multi-period mode: dashed marks where the intermediate peaks should be, numbered 1..N
+    const marks = App.measure.periodMarks(d);
+    if (ro.periods) {
+      ctx.strokeStyle = PERIOD_COLOR; ctx.lineWidth = 1.25; ctx.setLineDash([6, 4]); ctx.globalAlpha = 0.85;
+      ctx.beginPath();
+      for (const ix of marks) { const sx = Math.round(toScreen(v, ix, 0)[0]) + 0.5; ctx.moveTo(sx, gy0); ctx.lineTo(sx, gy1); }
+      ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
+      ctx.textAlign = 'center';
+      marks.forEach((ix, k) => {
+        const [sx] = toScreen(v, ix, 0), txt = String(k + 1), w = ctx.measureText(txt).width + 8;
+        ctx.fillStyle = 'rgba(0,0,0,0.75)'; roundRect(sx - w / 2, gy0 + 3, w, 16, 3); ctx.fill();
+        ctx.fillStyle = PERIOD_COLOR; ctx.fillText(txt, sx, gy0 + 11.5);
+      });
+      ctx.textAlign = 'left';
+    }
     for (const n of [1, 2]) {
       const ix = n === 1 ? cur.x1 : cur.x2;
       const [sx] = toScreen(v, ix, 0);
@@ -222,7 +238,10 @@ App.view = (() => {
     const by = gy1 + 14;
     ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(sx1, by - 5); ctx.lineTo(sx1, by + 5); ctx.moveTo(sx1, by); ctx.lineTo(sx2, by); ctx.moveTo(sx2, by - 5); ctx.lineTo(sx2, by + 5); ctx.stroke();
-    const dtTxt = `Δt ${App.util.formatSI(ro.dt, 's', 4)}   1/Δt ${App.util.formatSI(ro.freq, 'Hz', 4)}`;
+    const P = ro.periods;
+    const dtTxt = P
+      ? `Δt ${App.util.formatSI(ro.dt, 's', 4)} = ${P.n} × ${App.util.formatSI(P.period, 's', 4)}   f ${App.util.formatSI(P.freq, 'Hz', 5)}`
+      : `Δt ${App.util.formatSI(ro.dt, 's', 4)}   1/Δt ${App.util.formatSI(ro.freq, 'Hz', 4)}`;
     const w = ctx.measureText(dtTxt).width + 12, mx = (sx1 + sx2) / 2 - w / 2;
     ctx.fillStyle = 'rgba(15,17,21,0.9)'; roundRect(mx, by - 10, w, 20, 4); ctx.fill();
     ctx.fillStyle = '#e5e7eb'; ctx.fillText(dtTxt, mx + 6, by + 0.5);
@@ -269,6 +288,12 @@ App.view = (() => {
   function setCursorX(d, n, ix) {
     ix = App.util.clamp(ix, 0, d.width - 1);
     if (n === 1) d.cursors.x1 = ix; else d.cursors.x2 = ix;
+    // moving cursor 1 to another peak starts a new measurement; small fine-tuning keeps the mode
+    const p = d.cursors.periods;
+    if (n === 1 && p && Math.abs(ix - p.x1) > p.p0 / 2) {
+      d.cursors.periods = null;
+      App.events.emit('toast', 'Multi-period mode ended (cursor 1 moved to another cycle).');
+    }
   }
 
   function onDown(e) {
@@ -356,5 +381,26 @@ App.view = (() => {
   }
   function selectCursor(n) { const d = doc(); if (d) { d.cursors.sel = n; App.docs.touch(d, 'cursors'); } }
 
-  return { init, render, fit, fitGrid, zoom, nudge, selectCursor, setMode, getMode: () => mode, CURSOR_COLORS };
+  /** Multi-period mode on/off. On: the current cursor spacing becomes the reference period. */
+  function togglePeriods() {
+    const d = doc(); if (!d) return;
+    const c = d.cursors, span = Math.abs(c.x2 - c.x1);
+    if (c.periods) c.periods = null;
+    else if (span < 3) { App.events.emit('toast', 'Place the cursors on two adjacent peaks first.'); return; }
+    else {
+      c.periods = { p0: span, x1: c.x1 };
+      c.sel = 2;
+      App.events.emit('toast', 'Multi-period mode: now drag cursor 2 to a later peak.');
+    }
+    App.docs.touch(d, 'cursors');
+  }
+  /** Correct the period count by ±1 (refines the reference period to Δx / N). */
+  function stepPeriods(delta) {
+    const d = doc(); if (!d || !d.cursors.periods) return;
+    const n = Math.max(1, App.measure.periodCount(d) + delta);
+    d.cursors.periods.p0 = Math.abs(d.cursors.x2 - d.cursors.x1) / n;
+    App.docs.touch(d, 'cursors');
+  }
+
+  return { init, render, fit, fitGrid, zoom, nudge, selectCursor, setMode, getMode: () => mode, togglePeriods, stepPeriods, CURSOR_COLORS };
 })();

@@ -38,7 +38,7 @@ A **doc** is one loaded screenshot (`js/state.js`):
 | `calib` | yes | calibration, see below |
 | `status` | yes | `{time:{tdiv,tCenter}, channels:{C1:{vdiv,zeroY}}, grid}` with `'ok'|'warn'|'manual'` |
 | `notes, raw` | yes | human-readable detection notes, raw OCR strings (shown in the panel) |
-| `cursors` | yes | `{x1, x2, sel}`: cursor positions in **image px**, `sel` = keyboard target |
+| `cursors` | yes | `{x1, x2, sel, periods}`: cursor positions in **image px**, `sel` = keyboard target, `periods` = multi-period mode `{p0, x1}` (reference period and cursor-1 anchor in image px) or null |
 | `bitmap, imgData, traces, thumbUrl, view` | no | runtime caches, rebuilt on load |
 
 `calib` (`js/calibrate.js`):

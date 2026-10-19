@@ -64,23 +64,32 @@ App.ui = (() => {
   // ---------------------------------------------------------------- readout
   function renderReadout() {
     const d = App.docs.active(), box = $('#readout');
+    $('#tgl-periods').classList.toggle('on', !!(d && d.cursors.periods));
     if (!d) { box.innerHTML = '<p class="muted">No image loaded.</p>'; return; }
     const ro = App.measure.cursorReadout(d);
     const C = App.view.CURSOR_COLORS;
-    const sel = d.cursors.sel;
+    const sel = d.cursors.sel, P = ro.periods;
     const val = (x, unit) => x ? `<span class="v">${formatSI(x.v, unit, 4)}</span>${x.vMax - x.vMin > 1e-12 ? `<span class="band" title="Displayed band (trace thickness / sample block / persistence spread)">${formatRange(x.vMin, x.vMax, unit)}</span>` : ''}` : '<span class="v muted">no trace</span>';
     let rows = `
       <tr><th></th><th><button class="cur-tag ${sel === 1 ? 'sel' : ''}" data-cursor="1" style="--c:${C[1]}">1</button></th>
           <th><button class="cur-tag ${sel === 2 ? 'sel' : ''}" data-cursor="2" style="--c:${C[2]}">2</button></th><th>Δ (2−1)</th></tr>
       <tr><td class="lbl">t</td><td>${formatSI(ro.t1, 's')}</td><td>${formatSI(ro.t2, 's')}</td><td class="strong">${formatSI(ro.dt, 's')}</td></tr>
-      <tr><td class="lbl">1/Δt</td><td></td><td></td><td class="strong">${formatSI(ro.freq, 'Hz')}</td></tr>`;
-    for (const c of ro.channels) {
+      <tr><td class="lbl">1/Δt</td><td></td><td></td><td class="${P ? '' : 'strong'}">${formatSI(ro.freq, 'Hz')}</td></tr>`;
+    if (P) rows += `
+      <tr class="period-row"><td class="lbl">periods</td><td colspan="2"><span class="nstep"><button data-nstep="-1" title="One period less (,)">−</button><b>N = ${P.n}</b><button data-nstep="1" title="One period more (.)">+</button></span></td><td>T = ${formatSI(P.period, 's', 5)}</td></tr>
+      <tr><td class="lbl">N/Δt</td><td></td><td></td><td class="strong" title="Frequency measured over ${P.n} period${P.n > 1 ? 's' : ''}">${formatSI(P.freq, 'Hz', 5)}</td></tr>`;
+    ro.channels.forEach((c, i) => {
       const col = App.calib.channelById(c.id).color;
       rows += `
       <tr class="ch-row ${c.alt ? 'alt' : ''}"><td class="lbl"><span class="chip ${c.alt ? 'hollow' : ''}" style="--c:${col}" ${c.alt ? 'title="Second branch: the persistence display splits into two waveform populations here"' : ''}>${c.id}${c.alt ? ' ②' : ''}</span></td>
         <td>${val(c.a, c.unit)}</td><td>${val(c.b, c.unit)}</td><td class="strong">${formatSI(c.dv, c.unit)}</td></tr>
       <tr class="slope-row"><td class="lbl">ΔV/Δt</td><td colspan="2"></td><td class="strong">${formatRate(c.slope, c.unit)}</td></tr>`;
-    }
+      const pc = P && P.channels[i];
+      if (pc) rows += `
+      <tr class="slope-row" title="Per cycle: ${pc.cycles.map(x => formatSI(x, c.unit, 3)).join(', ')} pk-pk"><td class="lbl">amplitude</td>
+        <td colspan="2">${pc.pp !== null ? `${formatSI(pc.pp, c.unit, 4)} pp avg` : ''}</td>
+        <td class="strong">${pc.amp !== null ? `<span class="v">${formatSI(pc.amp, c.unit, 4)}</span><span class="band" title="Smallest … largest cycle">${formatRange(pc.ampMin, pc.ampMax, c.unit)}</span>` : '<span class="muted">no trace</span>'}</td></tr>`;
+    });
     box.innerHTML = `<table class="readout">${rows}</table>`;
   }
 
@@ -88,12 +97,15 @@ App.ui = (() => {
     const d = App.docs.active(); if (!d) return '';
     const ro = App.measure.cursorReadout(d);
     const head = ['image', 't1 [s]', 't2 [s]', 'dt [s]', '1/dt [Hz]'], vals = [d.name, ro.t1, ro.t2, ro.dt, ro.freq];
-    ro.channels.forEach(c => {
+    const P = ro.periods;
+    if (P) { head.push('periods N', 'T [s]', 'N/dt [Hz]'); vals.push(P.n, P.period, P.freq); }
+    ro.channels.forEach((c, i) => {
       const n = c.alt ? `${c.id} branch2` : c.id;
       head.push(`${n} v1 [${c.unit}]`, `${n} v2 [${c.unit}]`, `${n} dv [${c.unit}]`, `${n} dv/dt [${c.unit}/s]`);
       vals.push(c.v1, c.v2, c.dv, c.slope);
+      if (P) { head.push(`${n} amplitude [${c.unit}]`, `${n} amp min [${c.unit}]`, `${n} amp max [${c.unit}]`); vals.push(P.channels[i].amp, P.channels[i].ampMin, P.channels[i].ampMax); }
     });
-    const f = x => typeof x === 'number' ? (isFinite(x) ? x.toPrecision(6) : '') : x === null ? '' : String(x);
+    const f = x => typeof x === 'number' ? (Number.isInteger(x) ? String(x) : isFinite(x) ? x.toPrecision(6) : '') : x === null ? '' : String(x);
     return head.join('\t') + '\n' + vals.map(f).join('\t');
   }
 
@@ -234,7 +246,10 @@ App.ui = (() => {
       const pz = e.target.closest('[data-pickzero]');
       if (pz) { App.view.setMode({ type: 'pick-zero', ch: pz.dataset.pickzero }); toast(`Click on the image at the 0 level of ${pz.dataset.pickzero}.`); }
     });
-    $('#readout').addEventListener('click', e => { const b = e.target.closest('[data-cursor]'); if (b) App.view.selectCursor(+b.dataset.cursor); });
+    $('#readout').addEventListener('click', e => {
+      const b = e.target.closest('[data-cursor]'); if (b) App.view.selectCursor(+b.dataset.cursor);
+      const ns = e.target.closest('[data-nstep]'); if (ns) App.view.stepPeriods(+ns.dataset.nstep);
+    });
 
     App.events.on('docs-changed', () => { document.body.classList.toggle('empty', !App.docs.list().length); renderStrip(); renderStatus(null); });
     App.events.on('active-changed', renderAll);
