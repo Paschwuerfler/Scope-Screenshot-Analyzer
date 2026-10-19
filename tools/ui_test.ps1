@@ -63,6 +63,28 @@ try {
   $back = Invoke-CdpJs $sess 'App.docs.active().cursors.x1'
   Check 'navigate next/prev keeps cursors' (($id4 -ne $id5) -and ([math]::Abs($back - $x2) -lt 0.01)) "x1=$back"
 
+  # --- rename: double-click the name of a non-active thumbnail, type, Enter
+  $np = Invoke-CdpJs $sess '(() => { const r = document.querySelectorAll("#strip-list .thumb-name")[1].getBoundingClientRect(); return [r.left + 10, r.top + r.height / 2]; })()'
+  $idRen = Invoke-CdpJs $sess 'App.docs.list()[1].id'
+  Send-CdpMouse $sess 'mousePressed' $np[0] $np[1] 'left' 1; Send-CdpMouse $sess 'mouseReleased' $np[0] $np[1] 'left' 1
+  Send-CdpMouse $sess 'mousePressed' $np[0] $np[1] 'left' 2; Send-CdpMouse $sess 'mouseReleased' $np[0] $np[1] 'left' 2
+  Wait-Cdp $sess 'document.activeElement && document.activeElement.classList.contains("thumb-rename")' 5
+  Invoke-CdpJs $sess 'document.activeElement.select()' | Out-Null
+  Invoke-Cdp $sess 'Input.insertText' @{ text = 'renamed shot' } | Out-Null
+  Send-CdpKey $sess 'Enter' 'Enter' 13
+  $nm = Invoke-CdpJs $sess "App.docs.get('$idRen').name"
+  $lbl = Invoke-CdpJs $sess 'document.querySelectorAll("#strip-list .thumb-name")[1].textContent'
+  Check 'double-click renames image' (($nm -eq 'renamed shot') -and ($lbl -eq 'renamed shot')) "name=$nm label=$lbl"
+  # F2 + Escape cancels
+  Send-CdpKey $sess 'F2' 'F2' 113
+  Invoke-Cdp $sess 'Input.insertText' @{ text = 'nope' } | Out-Null
+  Send-CdpKey $sess 'Escape' 'Escape' 27
+  $nm2 = Invoke-CdpJs $sess "App.docs.get('$idRen').name"
+  $inp = Invoke-CdpJs $sess '!!document.querySelector(".thumb-rename")'
+  Check 'F2 + Esc cancels rename' (($nm2 -eq 'renamed shot') -and -not $inp) "name=$nm2"
+  if ($ShotDir) { Save-CdpScreenshot $sess (Join-Path $ShotDir 'ui_renamed.png') }
+  Invoke-CdpJs $sess "App.docs.setActive('$id4')" | Out-Null
+
   # --- reload: session restored from IndexedDB
   Start-Sleep -Milliseconds 800   # let debounced save run
   # navigate to the plain URL (a reload would keep ?samples and re-import the samples)
@@ -73,6 +95,8 @@ try {
   $rid = Invoke-CdpJs $sess 'App.docs.active() && App.docs.active().id'
   $rx = Invoke-CdpJs $sess 'App.docs.active().cursors.x1'
   Check 'reload restores session' (($rid -eq $id4) -and ([math]::Abs($rx - $x2) -lt 0.01)) "active=$rid x1=$rx"
+  $rn = Invoke-CdpJs $sess "App.docs.get('$idRen') && App.docs.get('$idRen').name"
+  Check 'reload keeps renamed image' ($rn -eq 'renamed shot') "name=$rn"
   if ($ShotDir) { Start-Sleep -Milliseconds 300; Save-CdpScreenshot $sess (Join-Path $ShotDir 'ui_restored.png') }
 } finally { Stop-CdpSession $sess }
 

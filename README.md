@@ -21,7 +21,9 @@ folder. Screenshots you load never leave your computer, even in the online versi
 - **Open files** / **Open folder** buttons
 
 All loaded images appear in the strip on the left. Each image keeps its own cursors and
-calibration, so you can switch freely (**↑/↓** or click a thumbnail).
+calibration, so you can switch freely (**↑/↓** or click a thumbnail). To rename an image,
+double-click its name, use the ✎ button on the thumbnail, or press **F2**
+(**Enter** saves, **Esc** cancels). The name is also used in copied readouts and exports.
 
 ## Measuring
 

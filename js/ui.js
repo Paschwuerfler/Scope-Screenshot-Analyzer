@@ -24,11 +24,41 @@ App.ui = (() => {
     $('#strip-list').innerHTML = docs.map((d, i) => `
       <li class="thumb ${act && act.id === d.id ? 'active' : ''}" data-id="${d.id}" title="${esc(d.name)}">
         <img src="${d.thumbUrl}" alt="" draggable="false">
-        <div class="thumb-meta"><span class="thumb-idx">${i + 1}</span><span class="thumb-name">${esc(d.name)}</span>${badge(docHealth(d))}</div>
-        <button class="thumb-del" data-del="${d.id}" title="Remove from session">×</button>
+        <div class="thumb-meta"><span class="thumb-idx">${i + 1}</span><span class="thumb-name" title="Double-click to rename (F2)">${esc(d.name)}</span>${badge(docHealth(d))}</div>
+        <div class="thumb-btns">
+          <button data-rename="${d.id}" title="Rename (F2)">✎</button>
+          <button class="thumb-del" data-del="${d.id}" title="Remove from session">×</button>
+        </div>
       </li>`).join('');
     const el = $('#strip-list .active');
     if (el) el.scrollIntoView({ block: 'nearest' });
+  }
+
+  /** Swap the name label of a thumbnail for a text field. Enter/blur saves, Esc cancels. */
+  function startRename(id) {
+    const d = App.docs.get(id || (App.docs.active() || {}).id);
+    const span = d && $(`#strip-list .thumb[data-id="${d.id}"] .thumb-name`);
+    if (!span) return;
+    const inp = document.createElement('input');
+    inp.className = 'thumb-rename'; inp.value = d.name; inp.spellcheck = false;
+    let done = false;
+    const finish = ok => {
+      if (done) return; done = true;
+      if (ok && inp.value.trim() && inp.value.trim() !== d.name) App.docs.rename(d.id, inp.value);
+      else renderStrip();
+    };
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+      e.stopPropagation();
+    });
+    inp.addEventListener('blur', () => finish(true));
+    inp.addEventListener('click', e => e.stopPropagation());
+    inp.addEventListener('dblclick', e => e.stopPropagation());
+    span.replaceWith(inp);
+    inp.focus();
+    const dot = d.name.lastIndexOf('.');
+    inp.setSelectionRange(0, dot > 0 ? dot : d.name.length);
   }
 
   // ---------------------------------------------------------------- readout
@@ -186,8 +216,14 @@ App.ui = (() => {
     $('#strip-list').addEventListener('click', e => {
       const del = e.target.closest('[data-del]');
       if (del) { App.docs.remove(del.dataset.del); return; }
+      const ren = e.target.closest('[data-rename]');
+      if (ren) { App.docs.setActive(ren.dataset.rename); startRename(ren.dataset.rename); return; }
       const li = e.target.closest('.thumb');
       if (li) App.docs.setActive(li.dataset.id);
+    });
+    $('#strip-list').addEventListener('dblclick', e => {
+      const li = e.target.closest('.thumb');
+      if (li && e.target.closest('.thumb-meta')) startRename(li.dataset.id);
     });
     $('#calib').addEventListener('change', onCalibChange);
     $('#calib').addEventListener('keydown', e => { if (e.key === 'Enter') e.target.blur(); });
@@ -200,7 +236,7 @@ App.ui = (() => {
     });
     $('#readout').addEventListener('click', e => { const b = e.target.closest('[data-cursor]'); if (b) App.view.selectCursor(+b.dataset.cursor); });
 
-    App.events.on('docs-changed', () => { document.body.classList.toggle('empty', !App.docs.list().length); renderStrip(); });
+    App.events.on('docs-changed', () => { document.body.classList.toggle('empty', !App.docs.list().length); renderStrip(); renderStatus(null); });
     App.events.on('active-changed', renderAll);
     App.events.on('doc-updated', (d, what) => {
       if (d !== App.docs.active()) return;
@@ -215,5 +251,5 @@ App.ui = (() => {
     App.events.on('busy', b => document.body.classList.toggle('busy', b));
   }
 
-  return { init, prefs, renderAll, toast, togglePref, readoutTSV };
+  return { init, prefs, renderAll, toast, togglePref, readoutTSV, startRename };
 })();

@@ -22,6 +22,7 @@
     'd': () => App.ui.togglePref('showOverlay'),
     'l': () => App.ui.togglePref('showValueLabels'),
     'c': e => { if (!e.ctrlKey && !e.metaKey) copyReadout(); else return false; },
+    'F2': () => App.ui.startRename(),
     'Escape': () => App.view.setMode(null),
     '?': () => $('#help').showModal(),
     'F1': () => $('#help').showModal(),

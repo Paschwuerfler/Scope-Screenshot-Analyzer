@@ -165,6 +165,13 @@ App.docs = (() => {
     App.events.emit('active-changed');
   }
 
+  function rename(id, name) {
+    const d = get(id), n = String(name || '').trim();
+    if (!d || !n || n === d.name) return;
+    d.name = n; save(d);
+    App.events.emit('docs-changed');
+  }
+
   async function clear() {
     docs.splice(0).forEach(d => d.thumbUrl && URL.revokeObjectURL(d.thumbUrl));
     activeId = null;
@@ -207,5 +214,5 @@ App.docs = (() => {
     if (first) setActive(first.id);
   }
 
-  return { list, get, active, setActive, step, addImage, restore, remove, clear, touch, analyze, exportSession, importSession, isPersistent: () => persistenceOk };
+  return { list, get, active, setActive, step, addImage, restore, remove, rename, clear, touch, analyze, exportSession, importSession, isPersistent: () => persistenceOk };
 })();
