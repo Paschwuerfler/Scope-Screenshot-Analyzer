@@ -1,6 +1,7 @@
 /* Scope Screenshot Analyzer — dark UI. Colours are tokens on :root; layout is a
    header / [strip | stage | panel] / status-bar grid. Sizes of the side columns are the
-   --strip-w and --panel-w tokens. */
+   --strip-w and --panel-w tokens. Below a 3:2 aspect ratio the columns become rows
+   (stage / panel / strip), see "narrow windows" near the end. */
 :root {
   --bg: #0f1115;
   --bg-2: #161a20;
@@ -15,6 +16,8 @@
   --danger: #f87171;
   --strip-w: 190px;
   --panel-w: 360px;
+  --panel-h: 34vh;    /* narrow layout: max height of the cursors/calibration row */
+  --thumb-w: 130px;   /* narrow layout: thumbnail width in the bottom bar */
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -22,7 +25,7 @@ html, body { height: 100%; margin: 0; }
 body {
   background: var(--bg); color: var(--fg);
   font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  display: grid; grid-template-rows: auto 1fr auto; overflow: hidden;
+  display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr); overflow: hidden;
 }
 button {
   font: inherit; color: var(--fg); background: var(--bg-3); border: 1px solid var(--line);
@@ -138,6 +141,33 @@ label.inline { display: flex; align-items: center; gap: 6px; margin-top: 6px; co
 .notes li { margin-bottom: 3px; }
 details.raw { margin-top: 6px; color: var(--fg-2); }
 details.raw pre { font-size: 10.5px; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow: auto; }
+
+/* ---------- narrow windows (aspect ratio below 3:2): stacked rows instead of columns
+   image on top, cursors + calibration side by side below it, gallery as a horizontal bar at the bottom */
+@media (max-aspect-ratio: 3/2) {
+  .toolbar, .stage-tools { flex-wrap: wrap; row-gap: 6px; }
+  main {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto auto;
+    grid-template-areas: "stage" "panel" "strip";
+  }
+  .stage { grid-area: stage; }
+  .panel {
+    grid-area: panel; display: flex; gap: 8px; max-height: var(--panel-h);
+    overflow: hidden; border-left: 0; border-top: 1px solid var(--line);
+  }
+  .panel .card { flex: 1 1 0; min-width: 0; overflow-y: auto; margin-bottom: 0; }
+  .strip { grid-area: strip; flex-direction: row; border-right: 0; border-top: 1px solid var(--line); }
+  .strip-head { flex-direction: column; justify-content: flex-start; gap: 2px; border-bottom: 0; border-right: 1px solid var(--line); }
+  #strip-list { display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden; }
+  .thumb { flex: 0 0 var(--thumb-w); min-width: 0; margin-bottom: 0; }
+}
+/* very narrow (portrait phone): cards stacked, panel scrolls */
+@media (max-aspect-ratio: 3/2) and (max-width: 640px) {
+  .panel { display: block; overflow: auto; }
+  .toolbar .hint { display: none; }
+  .panel .card { overflow: visible; margin-bottom: 8px; }
+}
 
 /* ---------- status bar, toast, dialog */
 .status { display: flex; gap: 16px; padding: 4px 12px; background: var(--bg-2); border-top: 1px solid var(--line); color: var(--fg-2); font-size: 12px; font-variant-numeric: tabular-nums; min-height: 26px; }

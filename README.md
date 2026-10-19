@@ -20,7 +20,8 @@ folder. Screenshots you load never leave your computer, even in the online versi
 - **Ctrl+V** pastes a screenshot from the clipboard
 - **Open files** / **Open folder** buttons
 
-All loaded images appear in the strip on the left. Each image keeps its own cursors and
+All loaded images appear in the strip on the left (in windows narrower than 3:2, the layout
+switches to rows: image on top, cursors and calibration below, the images as a bar at the bottom). Each image keeps its own cursors and
 calibration, so you can switch freely (**↑/↓** or click a thumbnail). To rename an image,
 double-click its name, use the ✎ button on the thumbnail, or press **F2**
 (**Enter** saves, **Esc** cancels). The name is also used in copied readouts and exports.

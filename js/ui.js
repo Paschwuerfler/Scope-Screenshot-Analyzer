@@ -233,6 +233,12 @@ App.ui = (() => {
       const li = e.target.closest('.thumb');
       if (li) App.docs.setActive(li.dataset.id);
     });
+    // horizontal gallery (narrow layout): mouse wheel scrolls sideways
+    $('#strip-list').addEventListener('wheel', e => {
+      const el = e.currentTarget;
+      if (el.scrollWidth <= el.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+      el.scrollLeft += e.deltaY * (e.deltaMode === 1 ? 33 : 1); e.preventDefault();
+    }, { passive: false });
     $('#strip-list').addEventListener('dblclick', e => {
       const li = e.target.closest('.thumb');
       if (li && e.target.closest('.thumb-meta')) startRename(li.dataset.id);
