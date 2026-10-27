@@ -77,6 +77,11 @@ App.ui = (() => {
     App.docs.touch(d, 'cursors');
   }
 
+  /**
+   * Results first: one block for time, one per probed channel. Each block = an input line
+   * (values at cursor 1 -> cursor 2, with small cursor tags) followed by the results (Δ, slope / f),
+   * each with its label directly above. Value bands go under the input line, amplitude under ΔV.
+   */
   function renderReadout() {
     const d = App.docs.active(), box = $('#readout');
     $('#tgl-periods').classList.toggle('on', !!(d && d.cursors.periods));
@@ -85,28 +90,34 @@ App.ui = (() => {
     const ro = App.measure.cursorReadout(d);
     const C = App.view.CURSOR_COLORS;
     const sel = d.cursors.sel, P = ro.periods;
-    const val = (x, unit) => x ? `<span class="v">${formatSI(x.v, unit, 4)}</span>${x.vMax - x.vMin > 1e-12 ? `<span class="band" title="Displayed band (trace thickness / sample block / persistence spread)">${formatRange(x.vMin, x.vMax, unit)}</span>` : ''}` : '<span class="v muted">no trace</span>';
-    let rows = `
-      <tr><th></th><th><button class="cur-tag ${sel === 1 ? 'sel' : ''}" data-cursor="1" style="--c:${C[1]}">1</button></th>
-          <th><button class="cur-tag ${sel === 2 ? 'sel' : ''}" data-cursor="2" style="--c:${C[2]}">2</button></th><th>Δ (2−1)</th></tr>
-      <tr><td class="lbl">t</td><td>${formatSI(ro.t1, 's')}</td><td>${formatSI(ro.t2, 's')}</td><td class="strong">${formatSI(ro.dt, 's')}</td></tr>
-      <tr><td class="lbl">1/Δt</td><td></td><td></td><td class="${P ? '' : 'strong'}">${formatSI(ro.freq, 'Hz')}</td></tr>`;
-    if (P) rows += `
-      <tr class="period-row"><td class="lbl">periods</td><td colspan="2"><span class="nstep"><button data-nstep="-1" title="One period less (,)">−</button><b>N = ${P.n}</b><button data-nstep="1" title="One period more (.)">+</button></span></td><td>T = ${formatSI(P.period, 's', 5)}</td></tr>
-      <tr><td class="lbl">N/Δt</td><td></td><td></td><td class="strong" title="Frequency measured over ${P.n} period${P.n > 1 ? 's' : ''}">${formatSI(P.freq, 'Hz', 5)}</td></tr>`;
+    const tag = k => `<button class="cur-tag mini ${sel === k ? 'sel' : ''}" data-cursor="${k}" style="--c:${C[k]}" title="Select cursor ${k} (for nudging with the arrow keys)">${k}</button>`;
+    const input = (head, v1, v2) => `<div class="ro-in">${head}${tag(1)}<span>${v1}</span><span class="arr">→</span>${tag(2)}<span>${v2}</span></div>`;
+    const res = (k, v, sub = '', title = '') => `<div${title ? ` title="${title}"` : ''}><div class="ro-k">${k}</div><div class="ro-v">${v}</div>${sub}</div>`;
+    const sm = (html, title = '') => `<div class="ro-sm"${title ? ` title="${title}"` : ''}>${html}</div>`;
+    const pv = x => x ? formatSI(x.v, x.unit, 4) : '<span class="muted">no trace</span>';
+    const band = (x, unit) => x && x.vMax - x.vMin > 1e-12 ? formatRange(x.vMin, x.vMax, unit) : null;
+
+    const freq = P
+      ? res(`f over <span class="nstep"><button data-nstep="-1" title="One period less (,)">−</button><b>${P.n}</b><button data-nstep="1" title="One period more (.)">+</button></span> period${P.n > 1 ? 's' : ''}`,
+          formatSI(P.freq, 'Hz', 5), sm(`T ${formatSI(P.period, 's', 5)}`), `Frequency measured over ${P.n} period${P.n > 1 ? 's' : ''}`)
+      : res('1/Δt', formatSI(ro.freq, 'Hz'));
+    let html = `<div class="ro-blk">${input('<span class="lbl">t</span>', formatSI(ro.t1, 's'), formatSI(ro.t2, 's'))}
+      <div class="ro-main">${res('Δt (2−1)', formatSI(ro.dt, 's'), P ? sm(`1/Δt ${formatSI(ro.freq, 'Hz')}`) : '')}${freq}</div></div>`;
+
     ro.channels.forEach((c, i) => {
       const col = App.calib.channelById(c.id).color;
-      rows += `
-      <tr class="ch-row ${c.alt ? 'alt' : ''}"><td class="lbl"><span class="chip ${c.alt ? 'hollow' : ''}" style="--c:${col}" ${c.alt ? 'title="Second branch: the persistence display splits into two waveform populations here"' : ''}>${c.id}${c.alt ? ' ②' : ''}</span></td>
-        <td>${val(c.a, c.unit)}</td><td>${val(c.b, c.unit)}</td><td class="strong">${formatSI(c.dv, c.unit)}</td></tr>
-      <tr class="slope-row"><td class="lbl">ΔV/Δt</td><td colspan="2"></td><td class="strong">${formatRate(c.slope, c.unit)}</td></tr>`;
+      const chip = `<span class="chip ${c.alt ? 'hollow' : ''}" style="--c:${col}" ${c.alt ? 'title="Second branch: the persistence display splits into two waveform populations here"' : ''}>${c.id}${c.alt ? ' ②' : ''}</span>`;
+      const b1 = band(c.a, c.unit), b2 = band(c.b, c.unit);
+      const bands = b1 || b2 ? sm(`band ${b1 || '–'} → ${b2 || '–'}`, 'Displayed band (trace thickness / sample block / persistence spread)') : '';
       const pc = P && P.channels[i];
-      if (pc) rows += `
-      <tr class="slope-row" title="Per cycle: ${pc.cycles.map(x => formatSI(x, c.unit, 3)).join(', ')} pk-pk"><td class="lbl">amplitude</td>
-        <td colspan="2">${pc.pp !== null ? `${formatSI(pc.pp, c.unit, 4)} pp avg` : ''}</td>
-        <td class="strong">${pc.amp !== null ? `<span class="v">${formatSI(pc.amp, c.unit, 4)}</span><span class="band" title="Smallest … largest cycle">${formatRange(pc.ampMin, pc.ampMax, c.unit)}</span>` : '<span class="muted">no trace</span>'}</td></tr>`;
+      const sub = !pc ? '' : pc.amp !== null
+        ? sm(`amp <b>${formatSI(pc.amp, c.unit, 4)}</b> · pk-pk ${formatSI(pc.pp, c.unit, 4)}`) +
+          sm(`cycles ${formatRange(pc.ampMin, pc.ampMax, c.unit)}`, `Per cycle: ${pc.cycles.map(x => formatSI(x, c.unit, 3)).join(', ')} pk-pk`)
+        : sm('amplitude: no trace');
+      html += `<div class="ro-blk ch ${c.alt ? 'alt' : ''}" style="--c:${col}">${input(chip, pv(c.a && { ...c.a, unit: c.unit }), pv(c.b && { ...c.b, unit: c.unit }))}${bands}
+        <div class="ro-main">${res('ΔV', formatSI(c.dv, c.unit), sub)}${res('ΔV/Δt', formatRate(c.slope, c.unit))}</div></div>`;
     });
-    box.innerHTML = `<table class="readout">${rows}</table>`;
+    box.innerHTML = `<div class="readout">${html}</div>`;
   }
 
   function readoutTSV() {

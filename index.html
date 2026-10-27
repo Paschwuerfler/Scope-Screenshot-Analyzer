@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Scope Screenshot Analyzer</title>
-<link rel="stylesheet" href="css/app.css">
+<!-- ?v=N: bump on every publish so browsers never mix a new index.html with cached old scripts (GitHub Pages caches 10 min) -->
+<link rel="stylesheet" href="css/app.css?v=2">
 </head>
 <body class="empty">
 
@@ -57,12 +58,12 @@
   </section>
 
   <aside class="panel">
-    <section class="card">
+    <section class="card cursors-card">
       <div class="card-head"><span class="head-l"><h3>Cursors</h3><span id="probe-btns" class="probe-btns" title="Channels the cursors read"></span></span><span class="card-btns">
         <button id="tgl-periods" data-act="periods" class="small toggle" title="Multi-period mode: put the cursors on two adjacent peaks, switch on, then drag cursor 2 to a later peak. Dashed marks show where the peaks in between should be; frequency = N / Δt (P)">Multi-period</button>
         <button data-act="copy" class="small" title="Copy readout as tab-separated text (C)">Copy</button></span></div>
       <div id="readout"></div>
-      <p class="tip muted">Drag the lines · double-click to move the nearest · <kbd>←</kbd><kbd>→</kbd> nudge (<kbd>Shift</kbd> ×10, <kbd>Alt</kbd> ¼ px)</p>
+      <p class="tip ro-tip"><button data-act="help" class="link" title="Drag the lines · double-click to move the nearest · ← → nudge (Shift ×10, Alt ¼ px) · click for all shortcuts">? controls</button></p>
     </section>
     <section class="card">
       <div class="card-head"><h3 id="calib-title">Calibration</h3></div>
@@ -104,20 +105,20 @@
   <div class="dialog-actions"><button data-act="close">Close</button></div>
 </dialog>
 
-<script src="js/util.js"></script>
-<script src="js/ocr_glyphs.js"></script>
-<script src="js/ocr.js"></script>
-<script src="js/calibrate.js"></script>
-<script src="js/layouts/index.js"></script>
+<script src="js/util.js?v=2"></script>
+<script src="js/ocr_glyphs.js?v=2"></script>
+<script src="js/ocr.js?v=2"></script>
+<script src="js/calibrate.js?v=2"></script>
+<script src="js/layouts/index.js?v=2"></script>
 <script src="js/layouts/rtb2004.js"></script>
-<script src="js/traces.js"></script>
-<script src="js/series.js"></script>
-<script src="js/measure.js"></script>
-<script src="js/state.js"></script>
-<script src="js/loaders.js"></script>
-<script src="js/view.js"></script>
-<script src="js/overview.js"></script>
-<script src="js/ui.js"></script>
-<script src="js/app.js"></script>
+<script src="js/traces.js?v=2"></script>
+<script src="js/series.js?v=2"></script>
+<script src="js/measure.js?v=2"></script>
+<script src="js/state.js?v=2"></script>
+<script src="js/loaders.js?v=2"></script>
+<script src="js/view.js?v=2"></script>
+<script src="js/overview.js?v=2"></script>
+<script src="js/ui.js?v=2"></script>
+<script src="js/app.js?v=2"></script>
 </body>
 </html>

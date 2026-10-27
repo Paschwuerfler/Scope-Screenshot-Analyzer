@@ -12,7 +12,8 @@ new measurement, time-series import, UI controls). User guide: [README.md](READM
 ## Hard constraints
 - **Must keep working from `file://`**: classic `<script>` tags only (no ES modules, no `fetch`
   of local files, no workers loaded from files). New files must be added to the script list
-  in `index.html` (order matters: util → ocr → calibrate → layouts → traces → series → measure →
+  in `index.html` (with the same `?v=N` cache-busting suffix as the others; bump N in all tags
+  whenever publishing to GitHub Pages) (order matters: util → ocr → calibrate → layouts → traces → series → measure →
   state → loaders → view → overview → ui → app) and, if needed by tests, to `tools/test.html` / `tools/harvest.html`.
 - Everything hangs off the global `App` namespace (`App.util`, `App.ocr`, `App.calib`,
   `App.layouts`, `App.traces`, `App.series`, `App.measure`, `App.store`, `App.docs`, `App.loaders`,

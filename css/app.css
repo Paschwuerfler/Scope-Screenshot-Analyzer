@@ -118,20 +118,32 @@ body.busy #view { opacity: .6; }
 .card h3 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--fg-2); }
 .tip { font-size: 11.5px; margin: 8px 0 0; }
 
-table.readout { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
-.readout th { font-weight: 500; color: var(--fg-2); text-align: right; padding: 2px 4px; }
-.readout td { text-align: right; padding: 3px 4px; vertical-align: top; white-space: nowrap; }
-.readout td.lbl { text-align: left; color: var(--fg-2); }
-.readout td.strong { font-weight: 600; }
-.readout tr.ch-row td { border-top: 1px solid var(--line); padding-top: 5px; }
-.readout tr.slope-row td { padding-top: 0; }
-.readout .v { display: block; }
-.readout .band { display: block; font-size: 10.5px; color: var(--fg-2); }
-.readout tr.period-row td { border-top: 1px dashed var(--line); }
-.readout .nstep { display: inline-flex; align-items: center; gap: 4px; }
-.readout .nstep button { padding: 0 6px; line-height: 16px; }
+/* Cursor readout (results first). Higher contrast than the rest of the panel: the card
+   merges into the panel, blocks are near-black wells, channel blocks get a tint of the
+   channel colour (--c, set inline) mixed on the block itself. */
+.cursors-card { --ro-well: #0d1014; --ro-lbl: #b8c0cc; --ro-val: #f3f4f6; background: var(--bg-2); border-color: #2f3742; }
+.readout { display: grid; gap: 6px; font-variant-numeric: tabular-nums; color: var(--ro-val); }
+.ro-blk { background: var(--ro-well); border: 1px solid #2b323c; border-radius: 6px; padding: 6px 8px 7px; display: grid; gap: 4px; }
+.ro-blk.ch { background: color-mix(in srgb, var(--c) 10%, var(--ro-well)); border-color: color-mix(in srgb, var(--c) 45%, var(--ro-well)); }
+.ro-blk.ch.alt { border-style: dashed; }
+.ro-in { display: flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+.ro-in .lbl, .ro-in .arr { color: var(--ro-lbl); }
+.ro-in .lbl { min-width: 22px; }
+.ro-main { display: grid; grid-template-columns: 1fr 1fr; column-gap: 10px; }
+.ro-k { font-size: 11px; color: var(--ro-lbl); display: flex; align-items: center; gap: 6px; min-height: 18px; }
+.ro-v { font-size: 16px; font-weight: 600; line-height: 1.25; }
+.ro-sm { font-size: 11.5px; color: var(--ro-lbl); }
+.ro-sm b { color: var(--ro-val); font-weight: 600; }
+.readout .muted { color: var(--ro-lbl); }
+.readout .nstep { display: inline-flex; align-items: center; gap: 3px; }
+.readout .nstep button { padding: 0 5px; line-height: 14px; font-size: 11.5px; }
+.readout .nstep b { color: var(--ro-val); font-size: 11.5px; }
+.ro-tip { text-align: right; margin-top: 6px; }
+button.link { background: none; border: 0; padding: 0; color: var(--ro-lbl); font-size: 11.5px; }
+button.link:hover { color: var(--accent); }
 .cur-tag { background: var(--c); color: #0b0d10; border: 2px solid transparent; font-weight: 700; padding: 0 10px; border-radius: 4px; }
 .cur-tag.sel { border-color: #fff; }
+.cur-tag.mini { font-size: 10.5px; line-height: 14px; min-width: 17px; padding: 0 2px; border-width: 1.5px; border-radius: 3px; }
 .chip { display: inline-block; background: var(--c); color: #0b0d10; font-weight: 700; font-size: 11px; padding: 0 5px; border-radius: 3px; }
 .chip.hollow { background: transparent; color: var(--c); box-shadow: inset 0 0 0 1.5px var(--c); }
 

@@ -33,10 +33,12 @@ double-click its name, use the ✎ button on the thumbnail, or press **F2**
 
 - Drag a cursor line (or its tag above the grid). **Double-click** moves the nearest cursor there.
 - **←/→** nudge the selected cursor by 1 px (**Shift** 10 px, **Alt** ¼ px). **1**/**2**/**Tab** select a cursor.
-- The **Cursors** panel shows t1, t2, Δt, 1/Δt and, for each probed channel, the trace value at
-  both cursors, ΔV and ΔV/Δt. The colour-matched channel buttons next to the heading choose which
+- The **Cursors** panel puts the results first. The time block and each probed channel's block
+  (tinted in the channel colour) start with a small line of the values at cursor
+  **1** → cursor **2**, followed by the results: Δt and 1/Δt, or ΔV and ΔV/Δt. Clicking a small
+  1/2 tag selects that cursor. The colour-matched channel buttons next to the heading choose which
   channels the cursors read. The default is one channel: the scope's selected channel, otherwise
-  the first active one. The small grey range under each value is the band the screenshot
+  the first active one. The "band" line under a channel's cursor values is the range the screenshot
   actually shows (trace thickness, sample blocks at fast timebases, persistence spread). Treat
   it as the reading's uncertainty.
 - **Copy** (or **C**) copies the readout as tab-separated text, ready to paste into Excel.
@@ -44,10 +46,11 @@ double-click its name, use the ✎ button on the thumbnail, or press **F2**
   1. Put the cursors on two adjacent peaks, then switch on **Multi-period**. That spacing becomes the reference period.
   2. Drag cursor 2 to a later peak. The tool counts the periods N in between and draws N−1
      numbered dashed lines, evenly spaced. If they all sit on peaks, the frequency is constant.
-  3. The panel shows N, the period T = Δt/N and the frequency **N/Δt**. This is about N times more
+  3. The panel shows the frequency **f = N/Δt** with N and the period T = Δt/N. This is about N times more
      precise than reading one period. If N is counted wrong, correct it with **−/+** (or **,** / **.**).
-  4. For each channel, **amplitude** is (max − min)/2 within each cycle, averaged over the N cycles.
-     The grey range below it shows the smallest and largest cycle, so you can see the decay.
+  4. For each channel, **amp** (under ΔV) is (max − min)/2 within each cycle, averaged over the N
+     cycles, next to the average pk-pk. The **cycles** range shows the smallest and largest cycle,
+     so you can see the decay.
   
   The mode is saved per image. Click the button again (or **P**) to switch it off. Moving
   cursor 1 to another cycle also switches it off.
