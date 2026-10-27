@@ -137,6 +137,20 @@ App.series = (() => {
     return { t0, dt, n: nOut, cols, notes };
   }
 
+  /**
+   * Default channel names from the column headers: generic "C1" / "CH2" / "Channel 3" give none,
+   * anything else is kept (SPICE "V(out)" -> "Vout"). -> { C1: 'Vout', ... }
+   */
+  function autoNames(s) {
+    const out = {};
+    for (const col of s.cols) {
+      const n = col.name.trim();
+      if (!n || /^(?:C|CH|Channel)\s*[1-4]$/i.test(n)) continue;
+      out[col.id] = n.replace(/^([VI][a-z]?)\((.+)\)$/i, '$1$2');
+    }
+    return out;
+  }
+
   // 1-2-5 sequence >= x
   function nice125(x) {
     if (!(x > 0)) return 1;
@@ -236,5 +250,5 @@ App.series = (() => {
     return new Promise(res => cv.toBlob(b => res(URL.createObjectURL(b))));
   }
 
-  return { VH, isSeriesFile, readText, parse, autoCalib, setScale, gridDiv, rateText, valueAt, strokeColumn, thumbnail };
+  return { VH, isSeriesFile, readText, parse, autoNames, autoCalib, setScale, gridDiv, rateText, valueAt, strokeColumn, thumbnail };
 })();

@@ -159,6 +159,8 @@ try {
   # LTspice export: tab-separated, "time V(out) V(vcc)", adaptive (non-uniform) time steps
   $lt = Invoke-CdpJs $sess '(() => { const d = App.docs.list().find(x => x.name.startsWith("RealDecoupling")), s = d.series, c = s.cols[1]; return { ch: s.cols.map(c => c.id + ":" + c.name + ":" + c.unit).join(","), t1: s.t0 + (s.n - 1) * s.dt, n: s.n, vEnd: c.v[s.n - 1], resampled: d.notes.some(x => /resampled/.test(x)) }; })()'
   Check 'LTspice .txt parsed (SPICE names, units, span, resampled)' (($lt.ch -eq 'C1:V(out):V,C2:V(vcc):V') -and ([math]::Abs($lt.t1 - 4e-7) -lt 1e-15) -and $lt.resampled -and ([math]::Abs($lt.vEnd - 29.80548) -lt 1e-4)) ("n={0} {1} end={2}" -f $lt.n, $lt.ch, $lt.vEnd)
+  $nm = Invoke-CdpJs $sess '(() => { const n = p => JSON.stringify(App.docs.list().find(x => x.name.startsWith(p)).chNames); return n("RealDecoupling") + "|" + n("50A"); })()'
+  Check 'channel names from CSV headers (SPICE named, C1..C4 not)' ($nm -eq '{"C1":"Vout","C2":"Vvcc"}|{}') $nm
   $info = Invoke-CdpJs $sess '(() => { const d = App.docs.list().find(x => x.name.startsWith("50A")); App.docs.setActive(d.id); const s = d.series; return { id: d.id, n: s.n, dt: s.dt, ch: s.cols.map(c => c.id + ":" + c.unit).join(","), v: s.cols[1].v[5] }; })()'
   Check 'CSV parsed (4 channels, units, dt)' (($info.n -eq 129304) -and ($info.ch -eq 'C1:V,C2:A,C3:A,C4:A') -and ([math]::Abs($info.dt - 9.28e-7) -lt 1e-10)) ("n={0} dt={1} {2}" -f $info.n, $info.dt, $info.ch)
   Start-Sleep -Milliseconds 300
@@ -258,6 +260,12 @@ try {
   $c0 = Invoke-CdpJs $sess '(() => { const c = App.docs.active().calib; return App.calib.vAt(c, "C2", 400); })()'
   Invoke-CdpJs $sess '(() => { const i = document.querySelector("#calib [data-vdiv=C2]"); i.value = "20 A"; i.dispatchEvent(new Event("change", { bubbles: true })); })()' | Out-Null
   $c1 = Invoke-CdpJs $sess '(() => { const c = App.docs.active().calib; return [c.channels.C2.vdiv, App.calib.vAt(c, "C2", 400)]; })()'
+  # display: name C2, label shows in readout, legend and status bar
+  Invoke-CdpJs $sess '(() => { const i = document.querySelector("#calib [data-chname=C2]"); i.value = " Load current "; i.dispatchEvent(new Event("change", { bubbles: true })); })()' | Out-Null
+  Start-Sleep -Milliseconds 100
+  $lbl = Invoke-CdpJs $sess '[...document.querySelectorAll("#readout .chip")].map(e => e.textContent).join(",")'
+  Check 'channel name shown in readout' ($lbl -eq 'C2 (Load current)') $lbl
+  if ($ShotDir) { Save-CdpScreenshot $sess (Join-Path $ShotDir 'ui_csv_names.png') }
   Check 'display: scale change keeps centre value' (($c1[0] -eq 20) -and ([math]::Abs($c1[1] - $c0) -lt 1e-9)) "vdiv=$($c1[0]) centre $c0 -> $($c1[1])"
 
   # reload restores series docs
@@ -265,8 +273,8 @@ try {
   Invoke-Cdp $sess 'Page.reload' @{} | Out-Null
   Start-Sleep -Milliseconds 500
   Wait-Cdp $sess 'window.App && App.docs && App.docs.list().length === 3 && App.docs.active()' 30
-  $rs = Invoke-CdpJs $sess '(() => { const d = App.docs.active(); return { kind: d.kind, n: d.series && d.series.n, vdiv: d.calib.channels.C2.vdiv, series: document.body.classList.contains("series") }; })()'
-  Check 'reload restores CSV doc' (($rs.kind -eq 'series') -and ($rs.n -eq 129304) -and ($rs.vdiv -eq 20) -and $rs.series) "kind=$($rs.kind) n=$($rs.n) vdiv=$($rs.vdiv)"
+  $rs = Invoke-CdpJs $sess '(() => { const d = App.docs.active(); return { kind: d.kind, n: d.series && d.series.n, vdiv: d.calib.channels.C2.vdiv, name: d.chNames.C2, series: document.body.classList.contains("series") }; })()'
+  Check 'reload restores CSV doc (incl. channel name)' (($rs.kind -eq 'series') -and ($rs.n -eq 129304) -and ($rs.vdiv -eq 20) -and ($rs.name -eq 'Load current') -and $rs.series) "kind=$($rs.kind) n=$($rs.n) vdiv=$($rs.vdiv) name=$($rs.name)"
   $pw2 = Invoke-CdpJs $sess 'document.querySelector(".panel").getBoundingClientRect().width'
   Check 'reload keeps panel width' ([math]::Abs($pw2 - $pw) -lt 2) ("{0:N0} px" -f $pw2)
   if ($ShotDir) { Start-Sleep -Milliseconds 300; Save-CdpScreenshot $sess (Join-Path $ShotDir 'ui_csv_restored.png') }

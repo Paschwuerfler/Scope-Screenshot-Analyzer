@@ -68,7 +68,7 @@ App.ui = (() => {
     if (!d) { box.innerHTML = ''; return; }
     const probed = App.measure.probedChannels(d);
     box.innerHTML = App.calib.CHANNELS.filter(ch => d.calib.channels[ch.id] && d.calib.channels[ch.id].on).map(ch =>
-      `<button class="probe ${probed.includes(ch.id) ? 'on' : ''}" data-probe="${ch.id}" style="--c:${ch.color}" title="Read ${ch.id} at the cursors">${ch.id}</button>`).join('');
+      `<button class="probe ${probed.includes(ch.id) ? 'on' : ''}" data-probe="${ch.id}" style="--c:${ch.color}" title="Read ${esc(App.calib.chLabel(d, ch.id))} at the cursors">${ch.id}</button>`).join('');
   }
   function toggleProbe(id) {
     const d = App.docs.active(); if (!d) return;
@@ -106,7 +106,7 @@ App.ui = (() => {
 
     ro.channels.forEach((c, i) => {
       const col = App.calib.channelById(c.id).color;
-      const chip = `<span class="chip ${c.alt ? 'hollow' : ''}" style="--c:${col}" ${c.alt ? 'title="Second branch: the persistence display splits into two waveform populations here"' : ''}>${c.id}${c.alt ? ' ②' : ''}</span>`;
+      const chip = `<span class="chip ${c.alt ? 'hollow' : ''}" style="--c:${col}" ${c.alt ? 'title="Second branch: the persistence display splits into two waveform populations here"' : ''}>${esc(App.calib.chLabel(d, c.id))}${c.alt ? ' ②' : ''}</span>`;
       const b1 = band(c.a, c.unit), b2 = band(c.b, c.unit);
       const bands = b1 || b2 ? sm(`band ${b1 || '–'} → ${b2 || '–'}`, 'Displayed band (trace thickness / sample block / persistence spread)') : '';
       const pc = P && P.channels[i];
@@ -127,7 +127,7 @@ App.ui = (() => {
     const P = ro.periods;
     if (P) { head.push('periods N', 'T [s]', 'N/dt [Hz]'); vals.push(P.n, P.period, P.freq); }
     ro.channels.forEach((c, i) => {
-      const n = c.alt ? `${c.id} branch2` : c.id;
+      const n = App.calib.chLabel(d, c.id) + (c.alt ? ' branch2' : '');
       head.push(`${n} v1 [${c.unit}]`, `${n} v2 [${c.unit}]`, `${n} dv [${c.unit}]`, `${n} dv/dt [${c.unit}/s]`);
       vals.push(c.v1, c.v2, c.dv, c.slope);
       if (P) { head.push(`${n} amplitude [${c.unit}]`, `${n} amp min [${c.unit}]`, `${n} amp max [${c.unit}]`); vals.push(P.channels[i].amp, P.channels[i].ampMin, P.channels[i].ampMax); }
@@ -190,12 +190,13 @@ App.ui = (() => {
         <button id="btn-redetect" class="small" title="Reset all channel scales to fit the data">Auto scale</button></div>
       <div class="field"><label>Time / div</label><input data-w="tdiv" value="${esc(formatSI(w.tdiv, 's'))}"><span></span></div>
       <div class="field"><label>Time at centre</label><input data-w="tCenter" value="${esc(formatSI(w.tCenter, 's'))}"><span></span></div>
-      <table class="ch-table"><tr><th>Ch</th><th>On</th><th>Scale / div</th><th>Centre value</th></tr>`;
+      <table class="ch-table series-ch"><tr><th>Ch</th><th>On</th><th>Name</th><th>Scale / div</th><th>Centre value</th></tr>`;
     for (const col of d.series.cols) {
       const cc = c.channels[col.id], color = App.calib.channelById(col.id).color;
       html += `<tr class="${cc.on ? '' : 'off'}">
         <td><span class="chip" style="--c:${color}" title="${esc(col.name)} [${esc(col.unit)}]">${col.id}</span></td>
         <td><input type="checkbox" data-on="${col.id}" ${cc.on ? 'checked' : ''}></td>
+        <td><input data-chname="${col.id}" value="${esc((d.chNames || {})[col.id] || '')}" placeholder="name" title="Channel name, shown as ${col.id} (name) in the plot and readout. Column header: ${esc(col.name)}"></td>
         <td><input data-vdiv="${col.id}" value="${esc(formatSI(cc.vdiv, cc.unit))}" title="Wheel or ↑/↓: 1-2-5 steps" ${cc.on ? '' : 'disabled'}></td>
         <td><input data-centre="${col.id}" value="${esc(formatSI(centreOf(c, col.id), cc.unit))}" ${cc.on ? '' : 'disabled'}></td></tr>`;
     }
@@ -222,6 +223,9 @@ App.ui = (() => {
       const half = w.tdiv * 10 / s.dt / 2, mid = App.calib.xAt(c, w.tCenter);
       App.view.setWindow(d, mid - half, mid + half);
       syncSeriesWindow();
+    } else if (t.dataset.chname) {
+      d.chNames = { ...(d.chNames || {}), [t.dataset.chname]: t.value.trim() };
+      App.docs.touch(d, 'cursors');
     } else if (t.dataset.on) {
       c.channels[t.dataset.on].on = t.checked;
       App.docs.touch(d, 'calib');
@@ -297,7 +301,7 @@ App.ui = (() => {
     for (const ch of App.calib.CHANNELS) {
       const cc = d.calib.channels[ch.id];
       if (!cc.on) continue;
-      s += `<span style="color:${ch.color}">${ch.id} = ${formatSI(App.calib.vAt(d.calib, ch.id, h.iy), cc.unit)}</span>`;
+      s += `<span style="color:${ch.color}">${esc(App.calib.chLabel(d, ch.id))} = ${formatSI(App.calib.vAt(d.calib, ch.id, h.iy), cc.unit)}</span>`;
     }
     s += `<span class="muted">px ${h.ix.toFixed(0)}, ${h.iy.toFixed(0)}</span>`;
     $('#status-hover').innerHTML = s;

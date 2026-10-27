@@ -189,7 +189,7 @@ App.view = (() => {
     item(`${fmt(tdiv, 's', 3)}/div · ${fmt(1 / s.dt, 'Sa/s', 4)}`, '#e5e7eb');
     for (const col of s.cols) {
       const cc = c.channels[col.id];
-      if (cc && cc.on) item(`${col.id} ${fmt(cc.vdiv, cc.unit, 3)}/div`, App.calib.channelById(col.id).color);
+      if (cc && cc.on) item(`${App.calib.chLabel(d, col.id)} ${fmt(cc.vdiv, cc.unit, 3)}/div`, App.calib.channelById(col.id).color);
     }
     ctx.restore();
   }
@@ -202,7 +202,7 @@ App.view = (() => {
     const cc = d.calib.channels[h.id], x0 = SPAD.l, y0 = v.oy, y1 = toScreen(v, 0, d.calib.grid.bottom)[1];
     ctx.save();
     const lines = [
-      [`${h.id} · ${App.util.formatSI(cc.vdiv, cc.unit, 3)}/div`, 'bold 12px system-ui, sans-serif', App.calib.channelById(h.id).color],
+      [`${App.calib.chLabel(d, h.id)} · ${App.util.formatSI(cc.vdiv, cc.unit, 3)}/div`, 'bold 12px system-ui, sans-serif', App.calib.channelById(h.id).color],
       ['Scroll to change vertical scale', '12px system-ui, sans-serif', '#f3f4f6'],
       ['Drag to move (Shift: no snapping)', '12px system-ui, sans-serif', '#b8c0cc'],
     ];

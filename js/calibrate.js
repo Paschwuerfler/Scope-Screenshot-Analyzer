@@ -17,6 +17,8 @@ App.calib = (() => {
     { id: 'C4', color: '#9d9bf0', hue: [225, 265], minSat: 0.15 },
   ];
   const channelById = id => CHANNELS.find(c => c.id === id);
+  /** Display label of a channel: "C1 (Vout)" if the doc has a custom name for it, else "C1". */
+  const chLabel = (doc, id) => { const n = doc && doc.chNames && doc.chNames[id]; return n ? `${id} (${n})` : id; };
 
   function emptyCalib(width, height) {
     const channels = {};
@@ -37,5 +39,5 @@ App.calib = (() => {
   const vAt = (c, ch, y) => (c.channels[ch].zeroY - y) / pxPerDivY(c) * c.channels[ch].vdiv;
   const yAt = (c, ch, v) => c.channels[ch].zeroY - v / c.channels[ch].vdiv * pxPerDivY(c);
 
-  return { CHANNELS, channelById, emptyCalib, pxPerDivX, pxPerDivY, centerX, tAt, xAt, vAt, yAt };
+  return { CHANNELS, channelById, chLabel, emptyCalib, pxPerDivX, pxPerDivY, centerX, tAt, xAt, vAt, yAt };
 })();

@@ -65,10 +65,11 @@ double-click its name, use the ✎ button on the thumbnail, or press **F2**
 Scope waveform exports (`.csv`, `.txt`, `.tsv`) load like screenshots: drop them, open them, or
 paste CSV text with **Ctrl+V** (also copied Excel columns). The first column is time, up to four
 more columns become channels C1–C4. Headers like `C1 in V`, `CH2 [mA]` or `Current (A)` set
-names and units. Metadata lines at the top, `;`/tab separators and decimal commas are handled.
+names and units. A header other than C1…C4 / CH1…CH4 becomes the channel's name, shown as
+e.g. **C1 (Current)** in the plot legend, the cursor readout, the status bar and copied values. Metadata lines at the top, `;`/tab separators and decimal commas are handled.
 
 LTspice waveform exports (File → Export data as text, `.txt`) work too: SPICE names such as
-`V(out)` or `I(R1)` become the channel names with unit V or A. Simulation time steps are not
+`V(out)` or `I(R1)` become the channel names (`Vout`, `IR1`) with unit V or A. Simulation time steps are not
 uniform, so the data is resampled linearly onto a uniform grid at the median step (a note in the
 Display panel says so). For a `.step` simulation only the first run is loaded.
 
@@ -87,8 +88,8 @@ Display panel says so). For a `.step` simulation only the first run is loaded.
   The grip dots on the handle mark it as draggable. Hovering it shows a tooltip with the current
   scale and these controls.
 - The **Display** panel (in place of Calibration) shows samples, length and sample rate on one
-  line and sets the visible time/div and centre time. It also sets each channel's scale/div and centre value, or switches
-  a channel off. The **wheel** over a scale/div field steps through 1-2-5 (wheel up = larger
+  line and sets the visible time/div and centre time. It also sets each channel's name, scale/div and centre value, or switches
+  a channel off. Clear the name field to show just C1. The **wheel** over a scale/div field steps through 1-2-5 (wheel up = larger
   waveform), as do **↑/↓** in the field. **Auto scale** fits all channels again.
 - Cursors, Multi-period mode, Copy, rename, saving and export work as for screenshots. When
   zoomed out, **←/→** move the cursor by one screen pixel instead of one sample.

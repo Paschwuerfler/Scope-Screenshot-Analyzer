@@ -4,6 +4,7 @@
 //   { id, name, kind: 'image' | 'series', blob, width, height, addedAt,   // series: blob = CSV text, see js/series.js
 //     layoutId, layoutName,             // null = unknown layout (manual calibration)
 //     calib, status, notes, raw,        // see js/calibrate.js; status values 'ok'|'warn'|'manual'
+//     chNames: { C1: 'Vout', ... },     // optional custom channel names (App.calib.chLabel)
 //     cursors: { x1, x2, sel, periods } } // cursor x positions in image px, sel = 1|2 (keyboard target),
 //                                       // periods = multi-period mode {p0, x1} or null (js/measure.js)
 // and runtime-only fields (rebuilt on load, never saved):
@@ -51,7 +52,7 @@ App.store = (() => {
 })();
 
 App.docs = (() => {
-  const PERSISTED = ['id', 'name', 'kind', 'blob', 'width', 'height', 'addedAt', 'layoutId', 'layoutName', 'calib', 'status', 'notes', 'raw', 'cursors'];
+  const PERSISTED = ['id', 'name', 'kind', 'blob', 'width', 'height', 'addedAt', 'layoutId', 'layoutName', 'calib', 'status', 'notes', 'raw', 'chNames', 'cursors'];
   const docs = [];
   let activeId = null;
   let persistenceOk = true;
@@ -115,6 +116,7 @@ App.docs = (() => {
   async function hydrate(rec, blob = rec.blob) {
     if (rec.kind === 'series') {
       const doc = { ...rec, blob, series: App.series.parse(await App.series.readText(blob)) };
+      if (!doc.chNames) doc.chNames = App.series.autoNames(doc.series);   // saved before names existed
       doc.thumbUrl = await App.series.thumbnail(doc);
       return doc;
     }
@@ -146,7 +148,7 @@ App.docs = (() => {
   /** Add a time-series file (CSV text as Blob/File). Returns the doc. */
   async function addSeries(blob, name) {
     const series = App.series.parse(await App.series.readText(blob));
-    const doc = { id: App.util.uid(), name: name || 'data.csv', kind: 'series', blob, width: series.n, height: App.series.VH, addedAt: Date.now(), series };
+    const doc = { id: App.util.uid(), name: name || 'data.csv', kind: 'series', blob, width: series.n, height: App.series.VH, addedAt: Date.now(), series, chNames: App.series.autoNames(series) };
     analyze(doc);
     retrace(doc);
     doc.cursors = defaultCursors(doc);

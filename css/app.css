@@ -129,6 +129,7 @@ body.busy #view { opacity: .6; }
 .ro-in { display: flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
 .ro-in .lbl, .ro-in .arr { color: var(--ro-lbl); }
 .ro-in .lbl { min-width: 22px; }
+.ro-in .chip { max-width: 11em; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; }
 .ro-main { display: grid; grid-template-columns: 1fr 1fr; column-gap: 10px; }
 .ro-k { font-size: 11px; color: var(--ro-lbl); display: flex; align-items: center; gap: 6px; min-height: 18px; }
 .ro-v { font-size: 16px; font-weight: 600; line-height: 1.25; }
@@ -157,6 +158,7 @@ button.link:hover { color: var(--accent); }
 .ch-table td { padding: 2px 3px; }
 .ch-table td:nth-child(3) { display: flex; align-items: center; gap: 3px; }
 .ch-table tr.off .chip { opacity: .4; }
+.series-ch input[data-chname] { min-width: 4.5em; }
 .badge { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; font-size: 10.5px; font-weight: 700; color: #0b0d10; flex: none; }
 .badge.ok { background: var(--ok); }
 .badge.warn { background: var(--warn); }
