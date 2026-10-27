@@ -138,6 +138,68 @@ App.ui = (() => {
     return head.join('\t') + '\n' + vals.map(f).join('\t');
   }
 
+  // ---------------------------------------------------------------- one-step undo for bulk changes
+  // Auto scale / Re-detect and Paste display settings replace many values at once. The button that
+  // did it turns into "Undo" for UNDO_MS; undoing restores the snapshot taken just before.
+  const UNDO_MS = 10000;
+  let undo = null;   // { docId, btn, label, snap, timer }
+  const SNAP_KEYS = ['calib', 'status', 'notes', 'raw', 'layoutId', 'layoutName', 'axisCh'];
+  function snapshot(d) {
+    const snap = JSON.parse(JSON.stringify(Object.fromEntries(SNAP_KEYS.map(k => [k, d[k] === undefined ? null : d[k]]))));
+    if (d.kind === 'series') snap.window = { ...App.view.getWindow(d) };
+    return snap;
+  }
+  /** Run a bulk change on doc d with an undo offered on button `btn` (id) for a few seconds. */
+  function withUndo(d, btn, label, fn) {
+    const snap = snapshot(d);
+    fn();
+    if (undo) clearTimeout(undo.timer);
+    undo = { docId: d.id, btn, label, snap, timer: setTimeout(() => { undo = null; renderCalib(); }, UNDO_MS) };
+    renderCalib();
+  }
+  function doUndo() {
+    const d = undo && App.docs.get(undo.docId); if (!d) return;
+    const { snap, label } = undo;
+    clearTimeout(undo.timer); undo = null;
+    for (const k of SNAP_KEYS) d[k] = snap[k];
+    if (snap.window) App.view.setWindow(d, snap.window.xa, snap.window.xb);
+    App.docs.touch(d, 'calib');
+    toast(`${label} undone.`);
+  }
+  /** A bulk-change button, or "Undo" in its place while its undo is pending. */
+  function undoable(d, id, text, title) {
+    if (undo && undo.docId === d.id && undo.btn === id) return `<button id="btn-undo" class="small undo" title="Undo ${esc(undo.label)} (offered for ${UNDO_MS / 1000} s)">↶ Undo</button>`;
+    return `<button id="${id}" class="small" title="${title}">${text}</button>`;
+  }
+
+  // Display settings clipboard (series docs): per channel on/scale/offset, the time window, axis channel.
+  let copiedDisplay = null;
+  function copyDisplay(d) {
+    const c = d.calib, w = App.view.getWindow(d);
+    copiedDisplay = {
+      from: d.name, axisCh: App.series.axisChannel(d),
+      tA: App.calib.tAt(c, w.xa), tB: App.calib.tAt(c, w.xb),
+      channels: Object.fromEntries(d.series.cols.map(col => { const cc = c.channels[col.id]; return [col.id, { on: cc.on, vdiv: cc.vdiv, zeroY: cc.zeroY, unit: cc.unit }]; })),
+    };
+    toast(`Display settings of ${d.name} copied. Select another CSV and press Paste.`);
+    renderCalib();
+  }
+  function pasteDisplay(d) {
+    const src = copiedDisplay, c = d.calib, skipped = [];
+    withUndo(d, 'btn-pastedisp', 'Paste display settings', () => {
+      for (const col of d.series.cols) {
+        const from = src.channels[col.id], cc = c.channels[col.id];
+        if (!from) continue;
+        if (from.unit !== cc.unit) { skipped.push(`${col.id} (${from.unit} → ${cc.unit})`); continue; }
+        Object.assign(cc, { on: from.on, vdiv: from.vdiv, zeroY: from.zeroY });
+      }
+      if (src.axisCh && c.channels[src.axisCh]) d.axisCh = src.axisCh;
+      App.view.setWindow(d, App.calib.xAt(c, src.tA), App.calib.xAt(c, src.tB));
+      App.docs.touch(d, 'calib');
+    });
+    toast(`Display settings of ${src.from} pasted.` + (skipped.length ? ` Skipped, different unit: ${skipped.join(', ')}.` : ''));
+  }
+
   // ---------------------------------------------------------------- calibration editor
   function renderCalib() {
     const d = App.docs.active(), box = $('#calib');
@@ -148,7 +210,7 @@ App.ui = (() => {
     const g = c.grid;
     let html = `
       <div class="layout-row"><span class="layout-name">${esc(d.layoutName || '')}</span>${badge(d.layoutId ? 'ok' : 'manual')}
-        <button id="btn-redetect" class="small" title="Discard manual edits and run detection again">Re-detect</button></div>
+        ${undoable(d, 'btn-redetect', 'Re-detect', 'Discard manual edits and run detection again')}</div>
       <div class="field"><label>Time / div</label><input data-k="tdiv" value="${esc(formatSI(c.time.tdiv, 's'))}">${badge(st.time.tdiv)}</div>
       <div class="field"><label>Time at centre</label><input data-k="tCenter" value="${esc(formatSI(c.time.tCenter, 's'))}">${badge(st.time.tCenter)}</div>
       <table class="ch-table"><tr><th>Ch</th><th>On</th><th>Scale / div</th><th>0 level (y px)</th></tr>`;
@@ -189,7 +251,7 @@ App.ui = (() => {
     const c = d.calib, w = seriesWindow(d), axis = App.series.axisChannel(d);
     let html = `
       <div class="layout-row"><span class="layout-name one-line" title="CSV: ${d.series.n.toLocaleString('en')} samples, ${esc(formatSI((d.series.n - 1) * d.series.dt, 's'))} long, ${esc(formatSI(d.series.dt, 's'))} per sample">${d.series.n.toLocaleString('en')} Sa · ${esc(formatSI((d.series.n - 1) * d.series.dt, 's'))} · <span class="rate">${esc(App.series.rateText(d.series))}</span></span>
-        <button id="btn-redetect" class="small" title="Reset all channel scales to fit the data">Auto scale</button></div>
+        ${undoable(d, 'btn-redetect', 'Auto scale', 'Reset all channel scales to fit the data')}</div>
       <div class="field"><label>Time / div</label><input data-w="tdiv" value="${esc(formatSI(w.tdiv, 's'))}"><span></span></div>
       <div class="field"><label>Time at centre</label><input data-w="tCenter" value="${esc(formatSI(w.tCenter, 's'))}"><span></span></div>
       <table class="ch-table series-ch"><tr><th>Ch</th><th>On</th><th>Name</th><th>Scale / div</th><th>Centre value</th></tr>`;
@@ -202,7 +264,11 @@ App.ui = (() => {
         <td><input data-vdiv="${col.id}" value="${esc(formatSI(cc.vdiv, cc.unit))}" title="Wheel or ↑/↓: 1-2-5 steps" ${cc.on ? '' : 'disabled'}></td>
         <td><input data-centre="${col.id}" value="${esc(formatSI(centreOf(c, col.id), cc.unit))}" ${cc.on ? '' : 'disabled'}></td></tr>`;
     }
-    html += '</table>';
+    html += `</table>
+      <div class="disp-copy">
+        <button id="btn-copydisp" class="small" title="Copy channel scales, offsets, on/off, the visible time window and the axis channel, to paste them into another CSV">Copy settings</button>
+        ${copiedDisplay ? undoable(d, 'btn-pastedisp', 'Paste settings', `Apply the display settings copied from ${esc(copiedDisplay.from)}`) : '<button class="small" disabled title="Copy the settings of another CSV first">Paste settings</button>'}
+      </div>`;
     if (d.notes && d.notes.length) html += `<ul class="notes series-notes">${d.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>`;
     return html;
   }
@@ -396,7 +462,15 @@ App.ui = (() => {
     }, { passive: false });
     $('#calib').addEventListener('click', e => {
       const d = App.docs.active(); if (!d) return;
-      if (e.target.id === 'btn-redetect') { App.docs.touch(d, 'detect'); toast(d.kind === 'series' ? 'Scales reset to fit the data.' : 'Detection re-run.'); }
+      const id = e.target.id;
+      if (id === 'btn-redetect') {
+        const series = d.kind === 'series';
+        withUndo(d, id, series ? 'Auto scale' : 'Re-detect', () => App.docs.touch(d, 'detect'));
+        toast(series ? 'Scales reset to fit the data. Undo is offered for 10 s.' : 'Detection re-run. Undo is offered for 10 s.');
+      }
+      if (id === 'btn-undo') doUndo();
+      if (id === 'btn-copydisp') copyDisplay(d);
+      if (id === 'btn-pastedisp' && copiedDisplay) pasteDisplay(d);
       if (e.target.id === 'btn-pickgrid') { App.view.setMode({ type: 'pick-grid' }); toast('Drag a rectangle over the graticule (outer grid border).'); }
       const ax = e.target.closest('[data-axis]');
       if (ax) { d.axisCh = ax.dataset.axis; App.docs.touch(d, 'calib'); }

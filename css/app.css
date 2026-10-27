@@ -151,6 +151,8 @@ button.chip { border: 0; font: inherit; font-weight: 700; font-size: 11px; line-
 .chip.hollow { background: transparent; color: var(--c); box-shadow: inset 0 0 0 1.5px var(--c); }
 
 .layout-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
+button.undo { border-color: var(--accent); color: var(--accent); }
+.disp-copy { display: flex; gap: 6px; margin-top: 8px; }
 .layout-name { flex: 1; font-weight: 600; }
 .layout-name.one-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .field { display: grid; grid-template-columns: 105px 1fr 18px; align-items: center; gap: 6px; margin-bottom: 5px; }

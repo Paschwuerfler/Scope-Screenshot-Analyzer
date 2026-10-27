@@ -293,6 +293,29 @@ try {
   $bo = Invoke-CdpJs $sess 'App.ui.prefs.bigText'
   Check 'screenshot mode off again' (-not $bo) "$bo"
 
+  # Auto scale -> button turns into Undo -> restores the manual scale
+  function Click-Sel($sel) { $p = Invoke-CdpJs $sess "(() => { const r = document.querySelector('$sel').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()"; Send-CdpMouse $sess 'mousePressed' $p[0] $p[1]; Send-CdpMouse $sess 'mouseReleased' $p[0] $p[1]; Start-Sleep -Milliseconds 150 }
+  $u0 = Invoke-CdpJs $sess 'App.docs.active().calib.channels.C2.vdiv'
+  Click-Sel '#btn-redetect'
+  $u1 = Invoke-CdpJs $sess '[App.docs.active().calib.channels.C2.vdiv, !!document.getElementById("btn-undo"), !document.getElementById("btn-redetect")]'
+  Click-Sel '#btn-undo'
+  $u2 = Invoke-CdpJs $sess '[App.docs.active().calib.channels.C2.vdiv, !!document.getElementById("btn-redetect")]'
+  Check 'Auto scale offers Undo, Undo restores manual scale' (($u1[0] -ne $u0) -and $u1[1] -and $u1[2] -and ($u2[0] -eq $u0) -and $u2[1]) "C2 $u0 -> $($u1[0]) -> $($u2[0])"
+  # copy display settings from the 50A CSV, paste into WFM05 (C1 in V), undo
+  Click-Sel '#btn-copydisp'
+  $src = Invoke-CdpJs $sess '(() => { const c = App.docs.active().calib.channels.C1; return [c.vdiv, c.zeroY]; })()'
+  Invoke-CdpJs $sess 'App.docs.setActive(App.docs.list().find(x => x.name.startsWith("WFM05")).id)' | Out-Null
+  Start-Sleep -Milliseconds 150
+  $w0 = Invoke-CdpJs $sess 'App.docs.active().calib.channels.C1.vdiv'
+  Click-Sel '#btn-pastedisp'
+  $w1 = Invoke-CdpJs $sess '(() => { const c = App.docs.active().calib.channels.C1; return [c.vdiv, c.zeroY, !!document.getElementById("btn-undo")]; })()'
+  Check 'paste display settings into another CSV' (($w1[0] -eq $src[0]) -and ([math]::Abs($w1[1] - $src[1]) -lt 1e-9) -and $w1[2]) "C1 $w0 -> $($w1[0])"
+  if ($ShotDir) { Save-CdpScreenshot $sess (Join-Path $ShotDir 'ui_csv_paste.png') }
+  Click-Sel '#btn-undo'
+  $w2 = Invoke-CdpJs $sess 'App.docs.active().calib.channels.C1.vdiv'
+  Check 'undo paste' ($w2 -eq $w0) "C1 -> $w2"
+  Invoke-CdpJs $sess 'App.docs.setActive(App.docs.list().find(x => x.name.startsWith("50A")).id)' | Out-Null
+
   # reload restores series docs
   Start-Sleep -Milliseconds 900
   Invoke-Cdp $sess 'Page.reload' @{} | Out-Null

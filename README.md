@@ -103,7 +103,12 @@ Display panel says so). For a `.step` simulation only the first run is loaded.
 - The **Display** panel (in place of Calibration) shows samples, length and sample rate on one
   line and sets the visible time/div and centre time. It also sets each channel's name, scale/div and centre value, or switches
   a channel off. Clear the name field to show just C1. The **wheel** over a scale/div field steps through 1-2-5 (wheel up = larger
-  waveform), as do **↑/↓** in the field. **Auto scale** fits all channels again.
+  waveform), as do **↑/↓** in the field. **Auto scale** fits all channels again. For 10 s
+  afterwards the button reads **↶ Undo** and brings your previous settings back.
+- **Copy settings** / **Paste settings** (below the channel table) carry the display settings
+  from one CSV to another: each channel's on/off, scale and offset, the visible time window and
+  the axis channel. Channels are matched by C1…C4; a channel whose unit differs (V vs A) is
+  skipped. After pasting, Paste turns into **↶ Undo** for 10 s.
 - Cursors, Multi-period mode, Copy, rename, saving and export work as for screenshots. When
   zoomed out, **←/→** move the cursor by one screen pixel instead of one sample.
 
@@ -112,7 +117,7 @@ Display panel says so). For a `.step` simulation only the first run is loaded.
 The **Calibration** panel shows every detected value with a badge:
 ✓ detected and confirmed by two sources, **!** uncertain (check it), ✎ set by you.
 All fields are editable (type e.g. `5 ns`, `200 mV`, `2.5 µs`). Use ⌖ to click a channel's
-0 level on the image. **Re-detect** discards your edits.
+0 level on the image. **Re-detect** discards your edits (for 10 s it turns into **↶ Undo**).
 
 Screenshots from an unknown scope: open *Graticule*, click **Pick grid on image…**, drag a
 rectangle over the outer grid border, enter the number of divisions, then set time/div, the time at
