@@ -187,6 +187,11 @@ try {
   Start-Sleep -Milliseconds 100
   $vz = Invoke-CdpJs $sess '(() => { const c = App.docs.active().calib.channels.C1; return [c.vdiv, c.zeroY]; })()'
   Check 'wheel on handle: 1-2-5 step, 0 level kept' (([math]::Abs($vz[0] - $vd0 / 2) -lt 1e-12) -and ([math]::Abs($vz[1] - $z1) -lt 1e-9)) "vdiv $vd0 -> $($vz[0])"
+  # hovering a handle: resize cursor + tooltip (check the screenshot)
+  Send-CdpMouse $sess 'mouseMoved' ($hp[0] - 6) ($hp[1] + 50)
+  $hc = Invoke-CdpJs $sess 'document.getElementById("view").style.cursor'
+  Check 'hover on handle (grip side) shows resize cursor' ($hc -eq 'ns-resize') $hc
+  if ($ShotDir) { Start-Sleep -Milliseconds 150; Save-CdpScreenshot $sess (Join-Path $ShotDir 'ui_csv_handle.png') }
   # scale/div field: wheel down = coarser, ArrowUp = coarser
   $fi = Invoke-CdpJs $sess '(() => { const r = document.querySelector("#calib [data-vdiv=C3]").getBoundingClientRect(); return [r.left + 20, r.top + r.height / 2, App.docs.active().calib.channels.C3.vdiv]; })()'
   Invoke-Cdp $sess 'Input.dispatchMouseEvent' @{ type = 'mouseWheel'; x = $fi[0]; y = $fi[1]; deltaX = 0; deltaY = 100 } | Out-Null
@@ -202,10 +207,10 @@ try {
 
   # wheel zoom: time only, anchored at the pointer
   $pv = Invoke-CdpJs $sess '(() => { const r = document.getElementById("view").getBoundingClientRect(); return [r.left + r.width * 0.3, r.top + r.height / 2]; })()'
-  $before = Invoke-CdpJs $sess "(() => { const w = App.view.getWindow(App.docs.active()), r = document.getElementById('view').getBoundingClientRect(); return { w: w.xb - w.xa, i: w.xa + ($($pv[0]) - r.left - 30) / (r.width - 44) * (w.xb - w.xa) }; })()"
+  $before = Invoke-CdpJs $sess "(() => { const w = App.view.getWindow(App.docs.active()), r = document.getElementById('view').getBoundingClientRect(); return { w: w.xb - w.xa, i: w.xa + ($($pv[0]) - r.left - 40) / (r.width - 54) * (w.xb - w.xa) }; })()"
   for ($k = 0; $k -lt 3; $k++) { Invoke-Cdp $sess 'Input.dispatchMouseEvent' @{ type = 'mouseWheel'; x = $pv[0]; y = $pv[1]; deltaX = 0; deltaY = -300 } | Out-Null }
   Start-Sleep -Milliseconds 200
-  $after = Invoke-CdpJs $sess "(() => { const w = App.view.getWindow(App.docs.active()), r = document.getElementById('view').getBoundingClientRect(); return { w: w.xb - w.xa, i: w.xa + ($($pv[0]) - r.left - 30) / (r.width - 44) * (w.xb - w.xa) }; })()"
+  $after = Invoke-CdpJs $sess "(() => { const w = App.view.getWindow(App.docs.active()), r = document.getElementById('view').getBoundingClientRect(); return { w: w.xb - w.xa, i: w.xa + ($($pv[0]) - r.left - 40) / (r.width - 54) * (w.xb - w.xa) }; })()"
   $td = Invoke-CdpJs $sess 'document.querySelector("#calib [data-w=tdiv]").value'
   Check 'time/div is a 1-2-5 value after zoom' ($td -match '^(1|2|5|10|20|50|100|200|500) [mµn]?s$') $td
   Check 'wheel zooms time axis around pointer' (($after.w -lt $before.w / 3) -and ([math]::Abs($after.i - $before.i) -lt 2)) ("width {0:N0} -> {1:N0} samples, anchor {2:N1} -> {3:N1}" -f $before.w, $after.w, $before.i, $after.i)

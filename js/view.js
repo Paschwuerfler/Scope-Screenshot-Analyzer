@@ -16,6 +16,7 @@ App.view = (() => {
   let mode = null;            // null | {type:'pick-zero', ch} | {type:'pick-grid'}
   let drag = null;            // {type:'cursor', n} | {type:'pan', sx, sy, ox, oy} | {type:'grid', ix0, iy0, ix1, iy1}
   let hover = null;           // {ix, iy}
+  let hoverHandle = null;     // series: channel id whose 0-level handle is under the pointer (tooltip)
 
   const doc = () => App.docs.active();
   const prefs = () => App.ui.prefs;
@@ -27,7 +28,7 @@ App.view = (() => {
     return d.view;
   }
   // series: plot margins (room for 0-level markers left, cursor tags above, Δt bracket below)
-  const SPAD = { l: 30, r: 14, t: 34, b: 40 };
+  const SPAD = { l: 40, r: 14, t: 34, b: 40 };
   function seriesView(d) {
     const w = clampWindow(d, d.view || { xa: 0, xb: d.width - 1 });
     d.view = w;
@@ -69,7 +70,7 @@ App.view = (() => {
     canvas.addEventListener('pointermove', onMove);
     canvas.addEventListener('pointerup', onUp);
     canvas.addEventListener('pointercancel', onUp);
-    canvas.addEventListener('pointerleave', () => { hover = null; App.events.emit('hover', null); render(); });
+    canvas.addEventListener('pointerleave', () => { hover = hoverHandle = null; App.events.emit('hover', null); render(); });
     canvas.addEventListener('wheel', onWheel, { passive: false });
     canvas.addEventListener('dblclick', onDblClick);
     resize();
@@ -109,8 +110,10 @@ App.view = (() => {
     if (App.overview) App.overview.render();
     if (drag && drag.type === 'grid') drawGridDrag(v);
     if (mode && hover) drawPickHint(d, v);
+    if (v.series && !drag && hoverHandle) drawHandleTip(d, v);
   }
 
+  const HANDLE_W = 36;        // series 0-level handle: grip dots + channel name + arrow tip
   /** Screen positions of the series 0-level handles: [{id, y, out}] (out = -1/+1 if clamped above/below). */
   function seriesHandles(d, v) {
     const g = d.calib.grid, y0 = v.oy + g.top * v.ky, y1 = v.oy + g.bottom * v.ky, out = [];
@@ -123,7 +126,7 @@ App.view = (() => {
     return out;
   }
   function hitHandle(d, v, sx, sy) {
-    if (!v.series || sx > SPAD.l + 1 || sx < SPAD.l - 28) return null;
+    if (!v.series || sx > SPAD.l + 1 || sx < SPAD.l - HANDLE_W - 2) return null;
     const hs = seriesHandles(d, v).reverse();   // topmost drawn first
     const h = hs.find(h => Math.abs(h.y - sy) <= 8);
     return h ? h.id : null;
@@ -158,13 +161,17 @@ App.view = (() => {
     }
     ctx.restore();
 
-    // 0-level handles left of the grid (drag = offset, wheel = scale)
+    // 0-level handles left of the grid (drag = offset, wheel = scale): grip dots, name, arrow tip
     ctx.font = 'bold 10px system-ui, sans-serif'; ctx.textBaseline = 'middle';
+    const hl = x0 - HANDLE_W;
     for (const h of seriesHandles(d, v)) {
       ctx.fillStyle = App.calib.channelById(h.id).color;
-      ctx.beginPath(); ctx.moveTo(x0 - 26, h.y - 7); ctx.lineTo(x0 - 8, h.y - 7); ctx.lineTo(x0 - 1, h.y); ctx.lineTo(x0 - 8, h.y + 7); ctx.lineTo(x0 - 26, h.y + 7); ctx.closePath(); ctx.fill();
-      if (drag && drag.type === 'offset' && drag.ch === h.id) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke(); }
-      ctx.fillStyle = '#0b0d10'; ctx.fillText(h.out ? h.id.slice(1) + (h.out < 0 ? '↑' : '↓') : h.id, x0 - 24, h.y + 0.5);
+      ctx.beginPath(); ctx.moveTo(hl, h.y - 7); ctx.lineTo(x0 - 8, h.y - 7); ctx.lineTo(x0 - 1, h.y); ctx.lineTo(x0 - 8, h.y + 7); ctx.lineTo(hl, h.y + 7); ctx.closePath(); ctx.fill();
+      const active = (drag && drag.type === 'offset' && drag.ch === h.id) || (!drag && hoverHandle === h.id);
+      if (active) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke(); }
+      ctx.fillStyle = '#0b0d10';
+      for (let r = -1; r <= 1; r++) for (const gx of [hl + 3, hl + 6]) ctx.fillRect(gx, h.y + r * 3 - 0.75, 1.5, 1.5);
+      ctx.fillText(h.out ? h.id.slice(1) + (h.out < 0 ? '↑' : '↓') : h.id, hl + 10, h.y + 0.5);
     }
     // time labels under the grid lines (every 1st/2nd/5th line, whatever fits), legend top left
     ctx.font = '11px system-ui, sans-serif'; ctx.textBaseline = 'top'; ctx.fillStyle = '#9aa3af';
@@ -184,6 +191,27 @@ App.view = (() => {
       const cc = c.channels[col.id];
       if (cc && cc.on) item(`${col.id} ${fmt(cc.vdiv, cc.unit, 3)}/div`, App.calib.channelById(col.id).color);
     }
+    ctx.restore();
+  }
+
+  /** Tooltip right of a hovered series handle: channel + scale, and what wheel / drag do.
+   *  Drawn last in draw() so cursors and labels never cover it. */
+  function drawHandleTip(d, v) {
+    const h = seriesHandles(d, v).find(h => h.id === hoverHandle);
+    if (!h) return;
+    const cc = d.calib.channels[h.id], x0 = SPAD.l, y0 = v.oy, y1 = toScreen(v, 0, d.calib.grid.bottom)[1];
+    ctx.save();
+    const lines = [
+      [`${h.id} · ${App.util.formatSI(cc.vdiv, cc.unit, 3)}/div`, 'bold 12px system-ui, sans-serif', App.calib.channelById(h.id).color],
+      ['Scroll to change vertical scale', '12px system-ui, sans-serif', '#f3f4f6'],
+      ['Drag to move (Shift: no snapping)', '12px system-ui, sans-serif', '#b8c0cc'],
+    ];
+    const w = Math.max(...lines.map(([t, f]) => { ctx.font = f; return ctx.measureText(t).width; })) + 16, lh = 17, H = lines.length * lh + 10;
+    const x = x0 + 8, y = App.util.clamp(h.y - H / 2, y0 + 2, y1 - H - 2);
+    ctx.fillStyle = 'rgba(13,16,20,0.95)'; ctx.strokeStyle = '#3e4858'; ctx.lineWidth = 1;
+    roundRect(x + 0.5, y + 0.5, w, H, 5); ctx.fill(); ctx.stroke();
+    ctx.textBaseline = 'middle';
+    lines.forEach(([t, f, col], i) => { ctx.font = f; ctx.fillStyle = col; ctx.fillText(t, x + 8, y + 5 + lh * i + lh / 2); });
     ctx.restore();
   }
 
@@ -434,7 +462,10 @@ App.view = (() => {
     else if (drag && drag.type === 'pan' && v.series) { const dx = (sx - drag.sx) / drag.kx; setWindow(d, drag.xa - dx, drag.xb - dx); }
     else if (drag && drag.type === 'pan') { v.ox = drag.ox + sx - drag.sx; v.oy = drag.oy + sy - drag.sy; v.fitted = false; }
     else if (drag && drag.type === 'grid') { drag.ix1 = ix; drag.iy1 = iy; }
-    else canvas.style.cursor = mode ? 'crosshair' : hitHandle(d, v, sx, sy) ? 'ns-resize' : hitCursor(d, v, sx, sy) ? 'ew-resize' : 'grab';
+    else {
+      hoverHandle = mode ? null : hitHandle(d, v, sx, sy);
+      canvas.style.cursor = mode ? 'crosshair' : hoverHandle ? 'ns-resize' : hitCursor(d, v, sx, sy) ? 'ew-resize' : 'grab';
+    }
     render();
   }
 

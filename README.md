@@ -84,6 +84,8 @@ Display panel says so). For a `.step` simulation only the first run is loaded.
 - **Drag a channel's handle** (the coloured marker left of the plot, at its 0 level) up or down
   to shift its offset. It snaps to the division lines; hold **Shift** to place it freely. The
   **wheel over a handle** changes that channel's scale in 1-2-5 steps and keeps the 0 level in place.
+  The grip dots on the handle mark it as draggable. Hovering it shows a tooltip with the current
+  scale and these controls.
 - The **Display** panel (in place of Calibration) shows samples, length and sample rate on one
   line and sets the visible time/div and centre time. It also sets each channel's scale/div and centre value, or switches
   a channel off. The **wheel** over a scale/div field steps through 1-2-5 (wheel up = larger
