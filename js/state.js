@@ -1,7 +1,7 @@
 // Documents (= loaded screenshots) and persistence.
 //
 // A doc has persisted fields (saved to IndexedDB, exported in sessions):
-//   { id, name, kind: 'image' | 'series', blob, width, height, addedAt,   // series: blob = CSV text, see js/series.js
+//   { id, name, kind: 'image' | 'series', blob, width, height, addedAt,   // series: blob = CSV text or packed samples, see js/series.js
 //     layoutId, layoutName,             // null = unknown layout (manual calibration)
 //     calib, status, notes, raw,        // see js/calibrate.js; status values 'ok'|'warn'|'manual'
 //     chNames: { C1: 'Vout', ... },     // optional custom channel names (App.calib.chLabel)
@@ -91,6 +91,8 @@ App.docs = (() => {
   function analyze(doc) {
     if (doc.kind === 'series') {
       const s = doc.series, { calib, status } = App.series.autoCalib(s);
+      // Auto scale keeps a unit the user switched (V <-> A)
+      if (doc.calib) for (const id in calib.channels) if (doc.calib.channels[id]) calib.channels[id].unit = doc.calib.channels[id].unit;
       const span = App.util.formatSI((s.n - 1) * s.dt, 's');
       Object.assign(doc, {
         layoutId: 'csv', layoutName: `CSV · ${s.n.toLocaleString('en')} samples · ${span}`, calib, status, raw: {},
@@ -116,7 +118,7 @@ App.docs = (() => {
   /** Rebuild runtime fields (bitmap/traces or parsed series, thumbnail) of a persisted record. */
   async function hydrate(rec, blob = rec.blob) {
     if (rec.kind === 'series') {
-      const doc = { ...rec, blob, series: App.series.parse(await App.series.readText(blob)) };
+      const doc = { ...rec, blob, series: await App.series.load(blob) };
       if (!doc.chNames) doc.chNames = App.series.autoNames(doc.series);   // saved before names existed
       doc.thumbUrl = await App.series.thumbnail(doc);
       return doc;
@@ -226,12 +228,28 @@ App.docs = (() => {
     App.events.emit('doc-updated', doc, what);
   }
 
-  // ---- export / import (portable JSON with embedded images)
+  // ---- export / import (portable JSON with embedded images and CSVs as data URLs)
   const blobToDataUrl = blob => new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
-  async function exportSession() {
-    const out = { app: 'scope-screenshot-analyzer', version: 1, exportedAt: new Date().toISOString(), docs: [] };
-    for (const d of docs) { const rec = serialize(d); rec.blob = await blobToDataUrl(d.blob); out.docs.push(rec); }
-    return new Blob([JSON.stringify(out)], { type: 'application/json' });
+  /**
+   * mode 'exact': stored files as they are; 'lossless' / 'compact': CSV docs packed as
+   * float32 / 16-bit (App.series.pack). -> { blob, lossy: [{ name, note }] } (docs newly stored at 16 bit).
+   */
+  async function exportSession(mode = 'exact') {
+    const out = { app: 'scope-screenshot-analyzer', version: 1, exportedAt: new Date().toISOString(), docs: [] }, lossy = [];
+    for (const d of docs) {
+      const rec = serialize(d);
+      let blob = d.blob;
+      const enc = d.kind === 'series' ? App.series.packedEnc(blob) : null, want = { lossless: 'f32', compact: 'q16' }[mode];
+      // already 16 bit: keep (unpacking to float32 would only be bigger)
+      if (d.kind === 'series' && want && enc !== want && enc !== 'q16') {
+        const p = await App.series.pack(d.series, want, d.calib.channels);
+        blob = p.blob;
+        if (p.note) { rec.notes = [p.note, ...(d.notes || []).filter(n => !App.series.isPrecisionNote(n))]; lossy.push({ name: d.name, note: p.note }); }
+      }
+      if (App.series.packedEnc(blob)) out.version = 2;   // older app versions cannot read packed series
+      rec.blob = await blobToDataUrl(blob); out.docs.push(rec);
+    }
+    return { blob: new Blob([JSON.stringify(out)], { type: 'application/json' }), lossy };
   }
   async function importSession(file) {
     const data = JSON.parse(await file.text());

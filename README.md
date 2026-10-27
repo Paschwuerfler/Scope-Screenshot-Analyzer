@@ -105,6 +105,9 @@ Display panel says so). For a `.step` simulation only the first run is loaded.
   a channel off. Clear the name field to show just C1. The **wheel** over a scale/div field steps through 1-2-5 (wheel up = larger
   waveform), as do **↑/↓** in the field. **Auto scale** fits all channels again. For 10 s
   afterwards the button reads **↶ Undo** and brings your previous settings back.
+- The small **V / A** button next to each scale/div field switches the channel's unit, for
+  example when a current column was read as volts (`I(L1) RLR=680`). Values stay the same, only
+  the unit in the readout, axis labels and legend changes. Auto scale keeps the unit you chose.
 - **Copy settings** / **Paste settings** (below the channel table) carry the display settings
   from one CSV to another: each channel's on/off, scale and offset, the visible time window and
   the axis channel. Channels are matched by C1…C4; a channel whose unit differs (V vs A) is
@@ -117,7 +120,8 @@ Display panel says so). For a `.step` simulation only the first run is loaded.
 The **Calibration** panel shows every detected value with a badge:
 ✓ detected and confirmed by two sources, **!** uncertain (check it), ✎ set by you.
 All fields are editable (type e.g. `5 ns`, `200 mV`, `2.5 µs`). Use ⌖ to click a channel's
-0 level on the image. **Re-detect** discards your edits (for 10 s it turns into **↶ Undo**).
+0 level on the image. The **V / A** button next to a scale switches the channel between volts and
+amperes (current probe). **Re-detect** discards your edits (for 10 s it turns into **↶ Undo**).
 
 Screenshots from an unknown scope: open *Graticule*, click **Pick grid on image…**, drag a
 rectangle over the outer grid border, enter the number of divisions, then set time/div, the time at
@@ -130,5 +134,16 @@ Supported layouts: **R&S RTB2004** (1280×824 screenshots, normal and persistenc
 Everything (images, cursors, edits) is saved automatically in the browser and restored the next
 time you open `index.html` in the same browser. **Export session** writes everything to a
 `.json` file. Import it (or drop it onto the window) on another computer.
+
+Sessions with CSV waveforms can get large (four 320,000-sample LTspice exports: 90 MB). If the
+file would be larger than 1 MB, Export asks how to store the waveforms:
+
+| Option | Example (90 MB session) | What you lose |
+|---|---|---|
+| **Lossless** (default) | 3.8 MB | Nothing the app shows or measures. The original CSV text is not kept (digits beyond float32 precision, columns beyond the 4th, other `.step` runs, original non-uniform time stamps). |
+| **Compact, 16 bit** | 0.24 MB | Each channel is rounded to 65,536 levels between its min and max; the dialog lists the max error per channel (here ±0.4 mV on 50 V signals). Imported CSVs keep this as a note in the Display panel. |
+| **Original files** | 90 MB | Nothing; the only format older versions of the app can import. |
+
+Smaller sessions are exported as original files without asking.
 
 Press **?** in the app for all shortcuts.

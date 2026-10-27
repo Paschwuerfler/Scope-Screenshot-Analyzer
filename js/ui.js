@@ -201,6 +201,21 @@ App.ui = (() => {
   }
 
   // ---------------------------------------------------------------- calibration editor
+  // Channel unit V <-> A (current probes, current columns read as volts). Values stay, only the unit changes.
+  const unitBtn = (id, cc) => {
+    const u = cc.unit || 'V', to = u === 'A' ? 'V' : 'A';
+    return `<button class="unit-tgl" data-unit="${id}" title="Unit of ${id}: ${esc(u)}. Click to switch to ${to} (e.g. current probe)" ${cc.on ? '' : 'disabled'}>${esc(u)}</button>`;
+  };
+  function flipUnit(d, id) {
+    const cc = d.calib.channels[id];
+    cc.unit = cc.unit === 'A' ? 'V' : 'A';
+    if (d.kind !== 'series') d.status.channels[id] = { ...(d.status.channels[id] || {}), vdiv: 'manual' };
+    App.docs.touch(d, 'calib');
+    toast(`${App.calib.chLabel(d, id)} is now shown in ${cc.unit}.`);
+    const b = document.querySelector(`#calib [data-unit="${id}"]`);
+    if (b) b.focus();
+  }
+
   function renderCalib() {
     const d = App.docs.active(), box = $('#calib');
     $('#calib-title').textContent = d && d.kind === 'series' ? 'Display' : 'Calibration';
@@ -219,7 +234,7 @@ App.ui = (() => {
       html += `<tr class="${cc.on ? '' : 'off'}">
         <td><span class="chip" style="--c:${ch.color}">${ch.id}</span></td>
         <td><input type="checkbox" data-on="${ch.id}" ${cc.on ? 'checked' : ''}></td>
-        <td><input data-vdiv="${ch.id}" value="${esc(formatSI(cc.vdiv, cc.unit || 'V'))}" ${cc.on ? '' : 'disabled'}>${cc.on ? badge(s.vdiv) : ''}</td>
+        <td><span class="nowrap"><input data-vdiv="${ch.id}" value="${esc(formatSI(cc.vdiv, cc.unit || 'V'))}" ${cc.on ? '' : 'disabled'}>${unitBtn(ch.id, cc)}${cc.on ? badge(s.vdiv) : ''}</span></td>
         <td><span class="nowrap"><input data-zero="${ch.id}" class="num" value="${cc.zeroY.toFixed(1)}" ${cc.on ? '' : 'disabled'}><button class="icon" data-pickzero="${ch.id}" title="Click on the image to set the 0 level" ${cc.on ? '' : 'disabled'}>⌖</button>${cc.on ? badge(s.zeroY) : ''}</span></td></tr>`;
     }
     html += `</table>
@@ -261,7 +276,7 @@ App.ui = (() => {
         <td><button class="chip ${col.id === axis ? 'axis' : ''}" data-axis="${col.id}" style="--c:${color}" title="Label the y axis with ${esc(App.calib.chLabel(d, col.id))} (column ${esc(col.name)} [${esc(col.unit)}])">${col.id}</button></td>
         <td><input type="checkbox" data-on="${col.id}" ${cc.on ? 'checked' : ''}></td>
         <td><input data-chname="${col.id}" value="${esc((d.chNames || {})[col.id] || '')}" placeholder="name" title="Channel name, shown as ${col.id} (name) in the plot and readout. Column header: ${esc(col.name)}"></td>
-        <td><input data-vdiv="${col.id}" value="${esc(formatSI(cc.vdiv, cc.unit))}" title="Wheel or ↑/↓: 1-2-5 steps" ${cc.on ? '' : 'disabled'}></td>
+        <td><span class="nowrap"><input data-vdiv="${col.id}" value="${esc(formatSI(cc.vdiv, cc.unit))}" title="Wheel or ↑/↓: 1-2-5 steps" ${cc.on ? '' : 'disabled'}>${unitBtn(col.id, cc)}</span></td>
         <td><input data-centre="${col.id}" value="${esc(formatSI(centreOf(c, col.id), cc.unit))}" ${cc.on ? '' : 'disabled'}></td></tr>`;
     }
     html += `</table>
@@ -384,6 +399,32 @@ App.ui = (() => {
     clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 4000);
   }
 
+  // ---------------------------------------------------------------- export dialog
+  /**
+   * Let the user pick the export format. opts = { exact?, lossless, compact } each
+   * { blob, lossy } from App.docs.exportSession (no exact: option hidden). Resolves to the
+   * chosen key or null (cancelled).
+   */
+  function askExport(opts) {
+    const dlg = $('#export-dlg');
+    $('#exp-now').textContent = formatSI(Math.max(...Object.values(opts).map(o => o.blob.size)), 'B', 3);
+    dlg.querySelectorAll('.exp-opt').forEach(el => { el.hidden = !opts[el.querySelector('input').value]; });
+    dlg.querySelectorAll('[data-size]').forEach(el => { if (opts[el.dataset.size]) el.textContent = formatSI(opts[el.dataset.size].blob.size, 'B', 3); });
+    const lossy = opts.compact.lossy;
+    $('#exp-err').innerHTML = lossy.length
+      ? lossy.map(l => `<li>${esc(l.name)}: ${esc(l.note.replace(/^.*max error /, '').replace(/\.$/, ''))}</li>`).join('')
+      : '<li>no change, the CSVs are already stored at 16 bit</li>';
+    dlg.querySelector('input[value="lossless"]').checked = true;
+    return new Promise(res => {
+      const done = mode => { dlg.onclose = null; dlg.close(); res(mode); };
+      dlg.querySelector('[data-act="ok"]').onclick = () => done(dlg.querySelector('input[name="exp-mode"]:checked').value);
+      dlg.querySelector('[data-act="cancel"]').onclick = () => done(null);
+      dlg.onclose = () => res(null);   // Esc
+      dlg.showModal();
+      dlg.querySelector('[data-act="ok"]').focus();
+    });
+  }
+
   function renderAll() {
     const d = App.docs.active();
     document.body.classList.toggle('empty', !App.docs.list().length);
@@ -450,7 +491,7 @@ App.ui = (() => {
     $('#probe-btns').addEventListener('click', e => { const b = e.target.closest('[data-probe]'); if (b) toggleProbe(b.dataset.probe); });
     $('#calib').addEventListener('change', onCalibChange);
     $('#calib').addEventListener('keydown', e => {
-      if (e.key === 'Enter') e.target.blur();
+      if (e.key === 'Enter' && e.target.matches('input')) e.target.blur();   // commit; buttons still activate
       if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && e.target.dataset.vdiv && App.docs.active().kind === 'series') {
         e.preventDefault(); stepSeriesScale(e.target.dataset.vdiv, e.key === 'ArrowUp' ? 1 : -1);
       }
@@ -474,6 +515,8 @@ App.ui = (() => {
       if (e.target.id === 'btn-pickgrid') { App.view.setMode({ type: 'pick-grid' }); toast('Drag a rectangle over the graticule (outer grid border).'); }
       const ax = e.target.closest('[data-axis]');
       if (ax) { d.axisCh = ax.dataset.axis; App.docs.touch(d, 'calib'); }
+      const un = e.target.closest('[data-unit]');
+      if (un) flipUnit(d, un.dataset.unit);
       const pz = e.target.closest('[data-pickzero]');
       if (pz) { App.view.setMode({ type: 'pick-zero', ch: pz.dataset.pickzero }); toast(`Click on the image at the 0 level of ${pz.dataset.pickzero}.`); }
     });
@@ -498,5 +541,5 @@ App.ui = (() => {
     App.events.on('busy', b => document.body.classList.toggle('busy', b));
   }
 
-  return { init, prefs, renderAll, toast, togglePref, readoutTSV, startRename };
+  return { init, prefs, renderAll, toast, togglePref, readoutTSV, startRename, askExport };
 })();

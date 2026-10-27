@@ -301,6 +301,21 @@ try {
   Click-Sel '#btn-undo'
   $u2 = Invoke-CdpJs $sess '[App.docs.active().calib.channels.C2.vdiv, !!document.getElementById("btn-redetect")]'
   Check 'Auto scale offers Undo, Undo restores manual scale' (($u1[0] -ne $u0) -and $u1[1] -and $u1[2] -and ($u2[0] -eq $u0) -and $u2[1]) "C2 $u0 -> $($u1[0]) -> $($u2[0])"
+  # unit button: C3 (A) -> V, readout + axis follow, Auto scale keeps it, Enter on the focused button flips back
+  Invoke-CdpJs $sess '(() => { const d = App.docs.active(); d.cursors.probe = ["C3"]; App.docs.touch(d, "calib"); })()' | Out-Null
+  Click-Sel '#calib [data-unit=C3]'
+  $un = Invoke-CdpJs $sess '[App.docs.active().calib.channels.C3.unit, document.querySelector("#calib [data-unit=C3]").textContent, App.measure.cursorReadout(App.docs.active()).channels[0].unit, document.activeElement.dataset.unit || ""]'
+  Click-Sel '#btn-redetect'
+  $ua = Invoke-CdpJs $sess 'App.docs.active().calib.channels.C3.unit'
+  Click-Sel '#btn-undo'
+  Invoke-CdpJs $sess 'document.querySelector("#calib [data-unit=C3]").focus()' | Out-Null
+  Invoke-Cdp $sess 'Input.dispatchKeyEvent' @{ type = 'keyDown'; key = 'Enter'; code = 'Enter'; windowsVirtualKeyCode = 13; text = [string][char]13 } | Out-Null
+  Invoke-Cdp $sess 'Input.dispatchKeyEvent' @{ type = 'keyUp'; key = 'Enter'; code = 'Enter'; windowsVirtualKeyCode = 13 } | Out-Null
+  Start-Sleep -Milliseconds 100
+  $ub = Invoke-CdpJs $sess 'App.docs.active().calib.channels.C3.unit'
+  Check 'unit button flips A <-> V (readout, button, Auto scale keeps it, keyboard)' (($un -join ',') -eq 'V,V,V,C3' -and $ua -eq 'V' -and $ub -eq 'A') "$($un -join ',') autoscale=$ua back=$ub"
+  if ($ShotDir) { Save-CdpScreenshot $sess (Join-Path $ShotDir 'ui_csv_unit.png') }
+
   # copy display settings from the 50A CSV, paste into WFM05 (C1 in V), undo
   Click-Sel '#btn-copydisp'
   $src = Invoke-CdpJs $sess '(() => { const c = App.docs.active().calib.channels.C1; return [c.vdiv, c.zeroY]; })()'
@@ -326,6 +341,44 @@ try {
   $pw2 = Invoke-CdpJs $sess 'document.querySelector(".panel").getBoundingClientRect().width'
   Check 'reload keeps panel width' ([math]::Abs($pw2 - $pw) -lt 2) ("{0:N0} px" -f $pw2)
   if ($ShotDir) { Start-Sleep -Milliseconds 300; Save-CdpScreenshot $sess (Join-Path $ShotDir 'ui_csv_restored.png') }
+
+  # export > 1 MB: Export session opens the format dialog (Esc = cancel, nothing downloaded)
+  Invoke-CdpJs $sess 'document.querySelector("[data-act=export]").click()' | Out-Null
+  Wait-Cdp $sess 'document.getElementById("export-dlg").open' 60
+  $dl = Invoke-CdpJs $sess '[...document.querySelectorAll("#export-dlg [data-size]")].map(e => e.dataset.size + "=" + e.textContent).join(" ") + " | " + document.getElementById("exp-err").innerText.replace(/\n/g, "; ")'
+  Check 'export > 1 MB opens the format dialog with sizes and errors' (($dl -match 'lossless=[\d.]+ MB') -and ($dl -match 'compact=[\d.]+ kB') -and ($dl -match 'exact=[\d.]+ MB') -and ($dl -match '\u00B1')) $dl
+  if ($ShotDir) { Save-CdpScreenshot $sess (Join-Path $ShotDir 'ui_export_dialog.png') }
+  Send-CdpKey $sess 'Escape' 'Escape' 27
+  Start-Sleep -Milliseconds 100
+  Check 'Esc closes the export dialog' (-not (Invoke-CdpJs $sess 'document.getElementById("export-dlg").open'))
+
+  # export formats round trip: lossless = bit-exact, 16 bit within the reported error + note
+  $rt = Invoke-CdpJs $sess @'
+(async () => {
+  const src = App.docs.list().slice(), out = {};
+  for (const mode of ['exact', 'lossless', 'compact']) {
+    const e = await App.docs.exportSession(mode), n0 = App.docs.list().length;
+    await App.docs.importSession(new File([e.blob], mode + '.json'));
+    const imp = App.docs.list().slice(n0);
+    let maxDiff = 0, maxRel = 0, notes = true;
+    src.forEach((d, k) => {
+      const a = d.series, b = imp[k].series;
+      if (b.n !== a.n || b.t0 !== a.t0 || b.dt !== a.dt) maxDiff = Infinity;
+      a.cols.forEach((c, j) => {
+        let m = 0; for (let i = 0; i < a.n; i++) m = Math.max(m, Math.abs(c.v[i] - b.cols[j].v[i]));
+        maxDiff = Math.max(maxDiff, m); maxRel = Math.max(maxRel, m / ((c.max - c.min) || 1));
+      });
+      if (mode === 'compact') notes = notes && /16-bit/.test(imp[k].notes[0]) && /16-bit/.test(imp[k].series.notes[0]);
+    });
+    out[mode] = { size: e.blob.size, lossy: e.lossy.length, maxDiff, maxRel, notes };
+    for (const d of imp) await App.docs.remove(d.id);
+  }
+  return out;
+})()
+'@
+  Check 'export original files: exact round trip' ($rt.exact.maxDiff -eq 0) ("{0:N0} bytes" -f $rt.exact.size)
+  Check 'export lossless: bit-exact samples, smaller' (($rt.lossless.maxDiff -eq 0) -and ($rt.lossless.size -lt $rt.exact.size / 2) -and ($rt.lossless.lossy -eq 0)) ("{0:N0} bytes" -f $rt.lossless.size)
+  Check 'export 16 bit: error <= half a level, note on every CSV, smallest' (($rt.compact.maxRel -le 0.5 / 65535 + 1e-6) -and $rt.compact.notes -and ($rt.compact.lossy -eq 3) -and ($rt.compact.size -lt $rt.lossless.size)) ("{0:N0} bytes, max error {1:E2} of range" -f $rt.compact.size, $rt.compact.maxRel)
 } finally { Stop-CdpSession $sess }
 
 if ($fails) { Write-Host "FAILED: $fails check(s)"; exit 1 } else { Write-Host 'ALL UI CHECKS PASSED' }

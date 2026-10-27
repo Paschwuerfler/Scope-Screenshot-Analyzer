@@ -162,6 +162,8 @@ button.undo { border-color: var(--accent); color: var(--accent); }
 .ch-table td { padding: 2px 3px; }
 .ch-table td:nth-child(3) { display: flex; align-items: center; gap: 3px; }
 .ch-table tr.off .chip { opacity: .4; }
+.ch-table .nowrap { display: flex; width: 100%; }
+.unit-tgl { flex: none; min-width: 22px; padding: 1px 4px; font-size: 11px; font-weight: 600; }
 .series-ch input[data-chname] { min-width: 4.5em; }
 .badge { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; font-size: 10.5px; font-weight: 700; color: #0b0d10; flex: none; }
 .badge.ok { background: var(--ok); }
@@ -214,3 +216,11 @@ dialog { background: var(--bg-2); color: var(--fg); border: 1px solid var(--line
 dialog::backdrop { background: rgba(0,0,0,.5); }
 dialog td { padding: 3px 10px 3px 0; vertical-align: top; }
 .dialog-actions { text-align: right; }
+.exp-opts { display: grid; gap: 8px; margin: 10px 0 14px; }
+.exp-opt { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.exp-opt:has(input:checked) { border-color: var(--accent); background: var(--bg-3); }
+.exp-opt[hidden] { display: none; }
+.exp-opt input { width: auto; flex: none; margin-top: 3px; }
+.exp-size { color: var(--accent); font-weight: 600; }
+#exp-err { margin: 4px 0; max-height: 24vh; overflow: auto; }
+button.primary { background: var(--accent); color: #0b0d10; border-color: var(--accent); font-weight: 600; }

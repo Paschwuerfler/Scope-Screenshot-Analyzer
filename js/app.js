@@ -63,12 +63,26 @@
     }
   }
 
+  // Above this size the export asks how to store CSV waveforms (lossless / 16 bit / original files)
+  const EXPORT_ASK_BYTES = 1024 * 1024;
   async function exportSession() {
-    if (!App.docs.list().length) { App.ui.toast('Nothing to export.'); return; }
-    const blob = await App.docs.exportSession();
+    const docs = App.docs.list();
+    if (!docs.length) { App.ui.toast('Nothing to export.'); return; }
+    const opts = { exact: await App.docs.exportSession('exact') };
+    const encs = docs.filter(d => d.kind === 'series').map(d => App.series.packedEnc(d.blob));
+    let mode = 'exact';
+    if (opts.exact.blob.size > EXPORT_ASK_BYTES && encs.some(e => e !== 'q16')) {
+      App.ui.toast('Preparing smaller export formats…');
+      opts.lossless = await App.docs.exportSession('lossless');
+      opts.compact = await App.docs.exportSession('compact');
+      // all CSVs already packed (imported from a compact export): "original files" = lossless
+      if (!encs.some(e => !e)) { opts.lossless = opts.exact; delete opts.exact; }
+      mode = await App.ui.askExport(opts);
+      if (!mode) return;
+    }
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `scope-session-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.json`;
+    a.href = URL.createObjectURL(opts[mode].blob);
+    a.download = `scope-session-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}${mode === 'compact' ? '-16bit' : ''}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }

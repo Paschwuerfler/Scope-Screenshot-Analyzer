@@ -7,6 +7,7 @@
 // values are read from the samples directly (App.measure.valueAtX), not from pixels.
 //
 // Runtime (never persisted): doc.series = { t0, dt, n, cols: [{ id, name, unit, v: Float32Array, min, max }] }
+// doc.blob is the CSV file, or after importing a compact session export a packed blob (pack / load).
 App.series = (() => {
   const VH = 800;                      // virtual height (px) of the graticule
   const RE = /\.(csv|txt|tsv|dat)$/i;
@@ -130,12 +131,92 @@ App.series = (() => {
       let id = ids[c];
       if (!id) { id = ['C1', 'C2', 'C3', 'C4'].find(x => !used.has(x)); used.add(id); }
       const v = vals[c].length === nOut ? vals[c] : vals[c].slice(0, nOut);
-      let min = Infinity, max = -Infinity;
-      for (let i = 0; i < nOut; i++) { const x = v[i]; if (x < min) min = x; if (x > max) max = x; }
-      cols.push({ id, name: hdr[c + 1].name, unit: hdr[c + 1].unit || 'V', v, min, max });
+      cols.push({ id, name: hdr[c + 1].name, unit: hdr[c + 1].unit || 'V', v, ...range(v) });
     }
     return { t0, dt, n: nOut, cols, notes };
   }
+  function range(v) {
+    let min = Infinity, max = -Infinity;
+    for (let i = 0; i < v.length; i++) { const x = v[i]; if (x < min) min = x; if (x > max) max = x; }
+    return { min, max };
+  }
+
+  // ---- compact storage (session export): parsed samples as gzip-compressed binary instead of CSV.
+  // Layout before gzip: 'SSA1', uint32 LE header length, header JSON { enc, t0, dt, n, notes, cols },
+  // then per column its samples split into byte planes (bytes 0 of all samples, then bytes 1, ...).
+  //   'f32': float32 words XORed with the previous one, bit-exact (the app parses CSVs to float32)
+  //   'q16': 65 536 levels from min to max, delta-coded; error ≤ half a level, stored per column
+  const MAGIC = 'SSA1', TYPE = 'application/x-scope-series-';
+  const PRECISION_RE = /^Stored at 16-bit precision/;
+  const pipe = async (blob, stream) => new Uint8Array(await new Response(blob.stream().pipeThrough(stream)).arrayBuffer());
+  function planes(bytes, k, inverse) {
+    const m = bytes.length / k, out = new Uint8Array(bytes.length);
+    for (let i = 0; i < m; i++) for (let j = 0; j < k; j++) {
+      if (inverse) out[i * k + j] = bytes[j * m + i]; else out[j * m + i] = bytes[i * k + j];
+    }
+    return out;
+  }
+  /** 'f32' | 'q16' for a packed blob, null for CSV text. */
+  const packedEnc = blob => (String(blob.type).match(/^application\/x-scope-series-(\w+)$/) || [])[1] || null;
+  const isPrecisionNote = n => PRECISION_RE.test(n);
+
+  /**
+   * Pack a parsed series. enc 'f32' (lossless) | 'q16'. channels (optional, calib.channels) give the
+   * displayed units for the error note. -> { blob, note } (note: q16 error text).
+   */
+  async function pack(s, enc, channels = {}) {
+    const n = s.n, cols = [], data = [];
+    for (const col of s.cols) {
+      const c = { id: col.id, name: col.name, unit: col.unit };
+      if (enc === 'f32') {
+        const u = new Uint32Array(col.v.slice(0, n).buffer), x = new Uint32Array(n);
+        for (let i = 0, p = 0; i < n; i++) { x[i] = u[i] ^ p; p = u[i]; }
+        data.push(planes(new Uint8Array(x.buffer), 4));
+      } else {
+        const lo = col.min, step = (col.max - col.min) / 65535 || 1, d = new Uint16Array(n);
+        let err = 0;
+        for (let i = 0, p = 0; i < n; i++) {
+          const q = Math.min(65535, Math.max(0, Math.round((col.v[i] - lo) / step)));
+          err = Math.max(err, Math.abs(Math.fround(lo + q * step) - col.v[i]));
+          d[i] = q - p; p = q;
+        }
+        Object.assign(c, { lo, step, err });
+        data.push(planes(new Uint8Array(d.buffer), 2));
+      }
+      cols.push(c);
+    }
+    const note = enc === 'q16' ? `Stored at 16-bit precision (compact session export), max error ${cols.map(c => `${c.id} ±${App.util.formatSI(c.err, (channels[c.id] || c).unit, 2)}`).join(', ')}.` : null;
+    const notes = [...(note ? [note] : []), ...s.notes.filter(x => !isPrecisionNote(x))];
+    const head = new TextEncoder().encode(JSON.stringify({ enc, t0: s.t0, dt: s.dt, n, notes, cols }));
+    const pre = new Uint8Array(8);
+    pre.set(new TextEncoder().encode(MAGIC)); new DataView(pre.buffer).setUint32(4, head.length, true);
+    const gz = await pipe(new Blob([pre, head, ...data]), new CompressionStream('gzip'));
+    return { blob: new Blob([gz], { type: TYPE + enc }), note };
+  }
+
+  /** Inverse of pack -> the same { t0, dt, n, cols, notes } as parse(). */
+  async function unpack(blob) {
+    const b = await pipe(blob, new DecompressionStream('gzip'));
+    if (new TextDecoder().decode(b.subarray(0, 4)) !== MAGIC) throw new Error('unknown compact series format');
+    const hl = new DataView(b.buffer, b.byteOffset).getUint32(4, true);
+    const h = JSON.parse(new TextDecoder().decode(b.subarray(8, 8 + hl))), n = h.n;
+    let off = 8 + hl;
+    const cols = h.cols.map(c => {
+      const v = new Float32Array(n);
+      if (h.enc === 'f32') {
+        const x = new Uint32Array(planes(b.subarray(off, off += 4 * n), 4, true).buffer), u = new Uint32Array(v.buffer);
+        for (let i = 0, p = 0; i < n; i++) { p ^= x[i]; u[i] = p; }
+      } else {
+        const d = new Uint16Array(planes(b.subarray(off, off += 2 * n), 2, true).buffer);
+        for (let i = 0, q = 0; i < n; i++) { q = (q + d[i]) & 0xFFFF; v[i] = c.lo + q * c.step; }
+      }
+      return { id: c.id, name: c.name, unit: c.unit, v, ...range(v) };
+    });
+    return { t0: h.t0, dt: h.dt, n, cols, notes: h.notes };
+  }
+
+  /** Parsed series from a stored blob: CSV text or packed. */
+  const load = async blob => packedEnc(blob) ? unpack(blob) : parse(await readText(blob));
 
   /**
    * Default channel names from the column headers: generic "C1" / "CH2" / "Channel 3" give none,
@@ -261,5 +342,5 @@ App.series = (() => {
     return new Promise(res => cv.toBlob(b => res(URL.createObjectURL(b))));
   }
 
-  return { VH, isSeriesFile, readText, parse, autoNames, autoCalib, axisChannel, setScale, gridDiv, rateText, valueAt, strokeColumn, thumbnail };
+  return { VH, isSeriesFile, readText, parse, load, pack, packedEnc, isPrecisionNote, autoNames, autoCalib, axisChannel, setScale, gridDiv, rateText, valueAt, strokeColumn, thumbnail };
 })();

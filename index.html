@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Scope Screenshot Analyzer</title>
 <!-- ?v=N: bump on every publish so browsers never mix a new index.html with cached old scripts (GitHub Pages caches 10 min) -->
-<link rel="stylesheet" href="css/app.css?v=6">
+<link rel="stylesheet" href="css/app.css?v=7">
 </head>
 <body class="empty">
 
@@ -109,20 +109,43 @@
   <div class="dialog-actions"><button data-act="close">Close</button></div>
 </dialog>
 
-<script src="js/util.js?v=6"></script>
-<script src="js/ocr_glyphs.js?v=6"></script>
-<script src="js/ocr.js?v=6"></script>
-<script src="js/calibrate.js?v=6"></script>
-<script src="js/layouts/index.js?v=6"></script>
-<script src="js/layouts/rtb2004.js"></script>
-<script src="js/traces.js?v=6"></script>
-<script src="js/series.js?v=6"></script>
-<script src="js/measure.js?v=6"></script>
-<script src="js/state.js?v=6"></script>
-<script src="js/loaders.js?v=6"></script>
-<script src="js/view.js?v=6"></script>
-<script src="js/overview.js?v=6"></script>
-<script src="js/ui.js?v=6"></script>
-<script src="js/app.js?v=6"></script>
+<!-- Shown by Export session when the file would be larger than 1 MB (App.ui.askExport) -->
+<dialog id="export-dlg">
+  <h3>Export session</h3>
+  <p>This session would be <b id="exp-now"></b>, mostly because of the CSV waveforms. Choose how to store them:</p>
+  <div class="exp-opts">
+    <label class="exp-opt"><input type="radio" name="exp-mode" value="lossless">
+      <span><b>Lossless</b> <span class="exp-size" data-size="lossless"></span> <span class="muted">(recommended)</span><br>
+      <span class="muted">Every sample the app shows and measures is kept bit for bit. The original CSV text is not kept:
+      digits beyond float32 precision (~7 digits), columns beyond the 4th, further LTspice .step runs and the original
+      time stamps of non-uniformly sampled files (the app never uses them).</span></span></label>
+    <label class="exp-opt"><input type="radio" name="exp-mode" value="compact">
+      <span><b>Compact, 16 bit</b> <span class="exp-size" data-size="compact"></span><br>
+      <span class="muted">Each channel is rounded to 65 536 levels between its minimum and maximum. Invisible in the plot,
+      but cursor values can be off by up to:</span>
+      <ul id="exp-err" class="notes"></ul>
+      <span class="muted">Imported CSVs keep this as a note in the Display panel. Cannot be undone after import.</span></span></label>
+    <label class="exp-opt"><input type="radio" name="exp-mode" value="exact">
+      <span><b>Original files</b> <span class="exp-size" data-size="exact"></span><br>
+      <span class="muted">The CSV files exactly as loaded. Largest; the only format older versions of this app can import.</span></span></label>
+  </div>
+  <div class="dialog-actions"><button data-act="cancel">Cancel</button> <button data-act="ok" class="primary">Export</button></div>
+</dialog>
+
+<script src="js/util.js?v=7"></script>
+<script src="js/ocr_glyphs.js?v=7"></script>
+<script src="js/ocr.js?v=7"></script>
+<script src="js/calibrate.js?v=7"></script>
+<script src="js/layouts/index.js?v=7"></script>
+<script src="js/layouts/rtb2004.js?v=7"></script>
+<script src="js/traces.js?v=7"></script>
+<script src="js/series.js?v=7"></script>
+<script src="js/measure.js?v=7"></script>
+<script src="js/state.js?v=7"></script>
+<script src="js/loaders.js?v=7"></script>
+<script src="js/view.js?v=7"></script>
+<script src="js/overview.js?v=7"></script>
+<script src="js/ui.js?v=7"></script>
+<script src="js/app.js?v=7"></script>
 </body>
 </html>

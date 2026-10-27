@@ -133,7 +133,13 @@ IndexedDB database `scope-screenshot-analyzer` (version 1):
 
 Saving is debounced (400 ms) per doc. If IndexedDB is unavailable or does not answer within
 4 s, the app keeps working and shows a toast suggesting Export. Session export/import is
-JSON with images as data URLs (`App.docs.exportSession / importSession`).
+JSON with images and CSVs as data URLs (`App.docs.exportSession(mode) / importSession`).
+Above 1 MB (`EXPORT_ASK_BYTES` in `app.js`) the export dialog (`App.ui.askExport`) offers modes
+`lossless` / `compact`, which replace CSV blobs by packed samples (`App.series.pack`: gzip via the
+built-in `CompressionStream`, header JSON + byte planes; `f32` = XOR-delta float32, bit-exact;
+`q16` = 16-bit delta, max error per column stored and shown as a doc note). A packed blob has type
+`application/x-scope-series-<enc>` and stays packed in IndexedDB after import; `App.series.load`
+reads either form. Exports containing packed blobs carry `version: 2`.
 Schema changes: bump `DB_VERSION` in `App.store` and migrate in `onupgradeneeded`; for doc-level
 changes add defaults when restoring in `App.docs.restore`.
 
