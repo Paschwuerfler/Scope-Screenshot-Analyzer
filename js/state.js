@@ -5,6 +5,7 @@
 //     layoutId, layoutName,             // null = unknown layout (manual calibration)
 //     calib, status, notes, raw,        // see js/calibrate.js; status values 'ok'|'warn'|'manual'
 //     chNames: { C1: 'Vout', ... },     // optional custom channel names (App.calib.chLabel)
+//     axisCh,                           // series: channel labelling the y axis (App.series.axisChannel)
 //     cursors: { x1, x2, sel, periods } } // cursor x positions in image px, sel = 1|2 (keyboard target),
 //                                       // periods = multi-period mode {p0, x1} or null (js/measure.js)
 // and runtime-only fields (rebuilt on load, never saved):
@@ -52,7 +53,7 @@ App.store = (() => {
 })();
 
 App.docs = (() => {
-  const PERSISTED = ['id', 'name', 'kind', 'blob', 'width', 'height', 'addedAt', 'layoutId', 'layoutName', 'calib', 'status', 'notes', 'raw', 'chNames', 'cursors'];
+  const PERSISTED = ['id', 'name', 'kind', 'blob', 'width', 'height', 'addedAt', 'layoutId', 'layoutName', 'calib', 'status', 'notes', 'raw', 'chNames', 'axisCh', 'cursors'];
   const docs = [];
   let activeId = null;
   let persistenceOk = true;

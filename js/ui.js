@@ -3,7 +3,7 @@
 App.ui = (() => {
   const { formatSI, formatRange, formatRate, parseSI, escapeHtml: esc } = App.util;
   const $ = sel => document.querySelector(sel);
-  const prefs = { showOverlay: false, panelW: null, panelH: null };   // panelW/H: splitter positions (px), null = CSS default
+  const prefs = { showOverlay: false, bigText: false, panelW: null, panelH: null };   // panelW/H: splitter positions (px), null = CSS default
 
   // ---------------------------------------------------------------- status badges
   const BADGE = { ok: ['✓', 'ok', 'Detected automatically, sources agree'], warn: ['!', 'warn', 'Uncertain — please check'], manual: ['✎', 'manual', 'Set manually'] };
@@ -74,7 +74,9 @@ App.ui = (() => {
     const d = App.docs.active(); if (!d) return;
     const p = App.measure.probedChannels(d);
     d.cursors.probe = p.includes(id) ? p.filter(x => x !== id) : [...p, id];
+    if (!p.includes(id)) d.axisCh = id;   // the channel switched on last labels the y axis (CSV)
     App.docs.touch(d, 'cursors');
+    if (d.kind === 'series') renderCalib();
   }
 
   /**
@@ -184,7 +186,7 @@ App.ui = (() => {
     return { tdiv: App.series.gridDiv((w.xb - w.xa) * s.dt), tCenter: App.calib.tAt(d.calib, (w.xa + w.xb) / 2) };
   }
   function seriesDisplayHtml(d) {
-    const c = d.calib, w = seriesWindow(d);
+    const c = d.calib, w = seriesWindow(d), axis = App.series.axisChannel(d);
     let html = `
       <div class="layout-row"><span class="layout-name one-line" title="CSV: ${d.series.n.toLocaleString('en')} samples, ${esc(formatSI((d.series.n - 1) * d.series.dt, 's'))} long, ${esc(formatSI(d.series.dt, 's'))} per sample">${d.series.n.toLocaleString('en')} Sa · ${esc(formatSI((d.series.n - 1) * d.series.dt, 's'))} · <span class="rate">${esc(App.series.rateText(d.series))}</span></span>
         <button id="btn-redetect" class="small" title="Reset all channel scales to fit the data">Auto scale</button></div>
@@ -194,7 +196,7 @@ App.ui = (() => {
     for (const col of d.series.cols) {
       const cc = c.channels[col.id], color = App.calib.channelById(col.id).color;
       html += `<tr class="${cc.on ? '' : 'off'}">
-        <td><span class="chip" style="--c:${color}" title="${esc(col.name)} [${esc(col.unit)}]">${col.id}</span></td>
+        <td><button class="chip ${col.id === axis ? 'axis' : ''}" data-axis="${col.id}" style="--c:${color}" title="Label the y axis with ${esc(App.calib.chLabel(d, col.id))} (column ${esc(col.name)} [${esc(col.unit)}])">${col.id}</button></td>
         <td><input type="checkbox" data-on="${col.id}" ${cc.on ? 'checked' : ''}></td>
         <td><input data-chname="${col.id}" value="${esc((d.chNames || {})[col.id] || '')}" placeholder="name" title="Channel name, shown as ${col.id} (name) in the plot and readout. Column header: ${esc(col.name)}"></td>
         <td><input data-vdiv="${col.id}" value="${esc(formatSI(cc.vdiv, cc.unit))}" title="Wheel or ↑/↓: 1-2-5 steps" ${cc.on ? '' : 'disabled'}></td>
@@ -233,6 +235,7 @@ App.ui = (() => {
       const p = parseSI(t.value, null);
       if (!p || p.value <= 0) return bad();
       App.series.setScale(d, t.dataset.vdiv, p.value, cy);
+      d.axisCh = t.dataset.vdiv;
       App.docs.touch(d, 'calib');
     } else if (t.dataset.centre) {
       const ch = c.channels[t.dataset.centre], p = parseSI(t.value, ch.unit);
@@ -247,6 +250,7 @@ App.ui = (() => {
     const d = App.docs.active(); if (!d || d.kind !== 'series') return;
     const ch = d.calib.channels[id]; if (!ch || !ch.on) return;
     App.series.setScale(d, id, App.util.step125(ch.vdiv, dir));
+    d.axisCh = id;
     App.docs.touch(d, 'calib');
     const inp = document.querySelector(`#calib [data-vdiv="${id}"]`);
     if (inp) inp.focus();
@@ -352,6 +356,7 @@ App.ui = (() => {
 
   function syncToggles() {
     $('#tgl-overlay').classList.toggle('on', prefs.showOverlay);
+    $('#tgl-bigtext').classList.toggle('on', !!prefs.bigText);
   }
 
   function togglePref(k) { prefs[k] = !prefs[k]; syncToggles(); App.view.render(); App.docs.touch(App.docs.active() || null, 'prefs'); }
@@ -393,6 +398,8 @@ App.ui = (() => {
       const d = App.docs.active(); if (!d) return;
       if (e.target.id === 'btn-redetect') { App.docs.touch(d, 'detect'); toast(d.kind === 'series' ? 'Scales reset to fit the data.' : 'Detection re-run.'); }
       if (e.target.id === 'btn-pickgrid') { App.view.setMode({ type: 'pick-grid' }); toast('Drag a rectangle over the graticule (outer grid border).'); }
+      const ax = e.target.closest('[data-axis]');
+      if (ax) { d.axisCh = ax.dataset.axis; App.docs.touch(d, 'calib'); }
       const pz = e.target.closest('[data-pickzero]');
       if (pz) { App.view.setMode({ type: 'pick-zero', ch: pz.dataset.pickzero }); toast(`Click on the image at the 0 level of ${pz.dataset.pickzero}.`); }
     });

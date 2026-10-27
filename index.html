@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Scope Screenshot Analyzer</title>
 <!-- ?v=N: bump on every publish so browsers never mix a new index.html with cached old scripts (GitHub Pages caches 10 min) -->
-<link rel="stylesheet" href="css/app.css?v=4">
+<link rel="stylesheet" href="css/app.css?v=5">
 </head>
 <body class="empty">
 
@@ -41,6 +41,9 @@
       <button data-act="zoom-in" title="Zoom in (+)">+</button>
       <button data-act="fit" title="Fit whole screenshot (F)">Fit</button>
       <button data-act="fit-grid" title="Zoom to the graticule (G)">Fit grid</button>
+      <span class="sep"></span>
+      <button id="tgl-bigtext" class="toggle" title="Screenshot mode: much larger labels, readouts and legend in the plot, for screenshots of the app (S)">Screenshot mode</button>
+      <button id="btn-copyimg" title="Copy the plot to the clipboard as a PNG image (paste into slides, chats, documents)">Copy image</button>
     </div>
     <div class="overview" title="Whole recording: drag a cursor line to move it, drag the window to pan, drag its edges to zoom, click to jump, wheel to zoom, double-click to show all"><canvas id="overview"></canvas></div>
     <div class="canvas-wrap"><canvas id="view"></canvas></div>
@@ -92,6 +95,7 @@
     <tr><td>Border image | panel</td><td>Drag = resize, double-click = reset</td></tr>
     <tr><td><kbd>F</kbd> / <kbd>0</kbd>, <kbd>G</kbd>, <kbd>+</kbd> <kbd>−</kbd></td><td>Fit screenshot, fit graticule, zoom in/out</td></tr>
     <tr><td><kbd>D</kbd></td><td>Toggle detection overlay (screenshots)</td></tr>
+    <tr><td><kbd>S</kbd></td><td>Screenshot mode: larger text in the plot</td></tr>
     <tr><td><kbd>C</kbd></td><td>Copy readout (tab-separated)</td></tr>
     <tr><td><kbd>P</kbd>, <kbd>,</kbd> <kbd>.</kbd></td><td>Multi-period mode on/off, one period less / more</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>V</kbd></td><td>Paste screenshot from clipboard</td></tr>
@@ -105,20 +109,20 @@
   <div class="dialog-actions"><button data-act="close">Close</button></div>
 </dialog>
 
-<script src="js/util.js?v=4"></script>
-<script src="js/ocr_glyphs.js?v=4"></script>
-<script src="js/ocr.js?v=4"></script>
-<script src="js/calibrate.js?v=4"></script>
-<script src="js/layouts/index.js?v=4"></script>
+<script src="js/util.js?v=5"></script>
+<script src="js/ocr_glyphs.js?v=5"></script>
+<script src="js/ocr.js?v=5"></script>
+<script src="js/calibrate.js?v=5"></script>
+<script src="js/layouts/index.js?v=5"></script>
 <script src="js/layouts/rtb2004.js"></script>
-<script src="js/traces.js?v=4"></script>
-<script src="js/series.js?v=4"></script>
-<script src="js/measure.js?v=4"></script>
-<script src="js/state.js?v=4"></script>
-<script src="js/loaders.js?v=4"></script>
-<script src="js/view.js?v=4"></script>
-<script src="js/overview.js?v=4"></script>
-<script src="js/ui.js?v=4"></script>
-<script src="js/app.js?v=4"></script>
+<script src="js/traces.js?v=5"></script>
+<script src="js/series.js?v=5"></script>
+<script src="js/measure.js?v=5"></script>
+<script src="js/state.js?v=5"></script>
+<script src="js/loaders.js?v=5"></script>
+<script src="js/view.js?v=5"></script>
+<script src="js/overview.js?v=5"></script>
+<script src="js/ui.js?v=5"></script>
+<script src="js/app.js?v=5"></script>
 </body>
 </html>

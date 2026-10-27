@@ -60,6 +60,15 @@ double-click its name, use the ✎ button on the thumbnail, or press **F2**
   grid and labels), each channel's 0 level, the extracted curve and its band. Use it to sanity-check
   a screenshot before trusting the numbers.
 
+## Screenshot mode
+
+**Screenshot mode** (button above the plot, or **S**) draws all text in the plot much larger:
+cursor tags, values, legend, axis labels, the Δt bracket and the detection overlay. Use it when
+you take screenshots of the app for slides or reports. Press **S** again to switch back.
+**Copy image** next to it puts the plot on the clipboard as a PNG image, at full screen
+resolution, ready to paste. If the browser does not allow clipboard access, the image is
+downloaded instead.
+
 ## CSV waveform exports
 
 Scope waveform exports (`.csv`, `.txt`, `.tsv`) load like screenshots: drop them, open them, or
@@ -87,6 +96,10 @@ Display panel says so). For a `.step` simulation only the first run is loaded.
   **wheel over a handle** changes that channel's scale in 1-2-5 steps and keeps the 0 level in place.
   The grip dots on the handle mark it as draggable. Hovering it shows a tooltip with the current
   scale and these controls.
+- The **y axis is labelled in one channel's colour**, like on a scope. That is the channel you
+  touched last: the probe chip you switched on next to "Cursors", the handle you dragged or
+  scrolled, the scale you changed, or the channel chip you clicked in the Display panel
+  (the chip with the white ring is the current one).
 - The **Display** panel (in place of Calibration) shows samples, length and sample rate on one
   line and sets the visible time/div and centre time. It also sets each channel's name, scale/div and centre value, or switches
   a channel off. Clear the name field to show just C1. The **wheel** over a scale/div field steps through 1-2-5 (wheel up = larger

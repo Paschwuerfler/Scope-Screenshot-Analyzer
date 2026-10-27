@@ -177,6 +177,17 @@ App.series = (() => {
   }
 
   /**
+   * Channel whose values label the y axis (colour-coded, like a scope): the one picked last
+   * (doc.axisCh: probe toggled on, handle dragged / scrolled, chip clicked in the Display panel),
+   * else the first probed channel, else the first one on.
+   */
+  function axisChannel(d) {
+    const on = id => d.calib.channels[id] && d.calib.channels[id].on;
+    if (d.axisCh && on(d.axisCh)) return d.axisCh;
+    return App.measure.probedChannels(d).find(on) || d.series.cols.map(c => c.id).find(on) || null;
+  }
+
+  /**
    * Change a channel's display scale keeping the value at virtual y `anchorY` where it is
    * (anchorY = grid centre: like a scope's scale knob; anchorY = zeroY: 0 level stays put).
    */
@@ -250,5 +261,5 @@ App.series = (() => {
     return new Promise(res => cv.toBlob(b => res(URL.createObjectURL(b))));
   }
 
-  return { VH, isSeriesFile, readText, parse, autoNames, autoCalib, setScale, gridDiv, rateText, valueAt, strokeColumn, thumbnail };
+  return { VH, isSeriesFile, readText, parse, autoNames, autoCalib, axisChannel, setScale, gridDiv, rateText, valueAt, strokeColumn, thumbnail };
 })();

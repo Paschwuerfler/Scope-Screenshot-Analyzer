@@ -20,6 +20,7 @@
     '=': () => App.view.zoom(1.25),
     '-': () => App.view.zoom(0.8),
     'd': () => App.ui.togglePref('showOverlay'),
+    's': () => App.ui.togglePref('bigText'),
     'c': e => { if (!e.ctrlKey && !e.metaKey) copyReadout(); else return false; },
     'p': () => App.view.togglePeriods(),
     ',': () => App.view.stepPeriods(-1),
@@ -44,6 +45,22 @@
     if (!tsv) return;
     try { await navigator.clipboard.writeText(tsv); App.ui.toast('Readout copied (tab-separated, paste into Excel).'); }
     catch { App.ui.toast('Clipboard not available.'); }
+  }
+
+  /** Copy the plot canvas as an image; falls back to downloading a PNG where the clipboard refuses. */
+  async function copyImage() {
+    const d = App.docs.active();
+    if (!d) { App.ui.toast('Nothing to copy.'); return; }
+    const blob = await App.view.toBlob();
+    try {
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      App.ui.toast('Plot copied to the clipboard as an image.');
+    } catch {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = d.name.replace(/\.[^.]+$/, '') + '.png'; a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      App.ui.toast('Clipboard not available here, so the image was downloaded instead.');
+    }
   }
 
   async function exportSession() {
@@ -80,6 +97,8 @@
     click('[data-act="zoom-in"]', () => App.view.zoom(1.25));
     click('[data-act="zoom-out"]', () => App.view.zoom(0.8));
     click('#tgl-overlay', () => App.ui.togglePref('showOverlay'));
+    click('#tgl-bigtext', () => App.ui.togglePref('bigText'));
+    click('#btn-copyimg', copyImage);
     click('#help [data-act="close"]', () => $('#help').close());
     window.addEventListener('keydown', onKey);
 

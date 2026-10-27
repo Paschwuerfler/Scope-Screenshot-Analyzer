@@ -20,6 +20,10 @@ App.view = (() => {
 
   const doc = () => App.docs.active();
   const prefs = () => App.ui.prefs;
+  // Screenshot mode (prefs.bigText): canvas text, the boxes around it and the margins scale by F().
+  const BIG_TEXT = 1.8;
+  const F = () => (prefs().bigText ? BIG_TEXT : 1);
+  const font = (px, bold) => `${bold ? 'bold ' : ''}${px * F()}px system-ui, sans-serif`;
 
   // ---------------------------------------------------------------- transforms
   function viewOf(d) {
@@ -28,8 +32,12 @@ App.view = (() => {
     return d.view;
   }
   // series: plot margins (room for 0-level markers left, cursor tags above, Δt bracket below)
-  const SPAD = { l: 40, r: 14, t: 34, b: 40 };
+  // (scaled in screenshot mode; recomputed in seriesView, which every series draw / hit test goes through)
+  const SPAD0 = { l: 40, r: 14, t: 34, b: 40 }, HANDLE_W0 = 36;   // handle: grip dots + channel name + arrow tip
+  let SPAD = SPAD0, HANDLE_W = HANDLE_W0;
   function seriesView(d) {
+    const f = F();
+    HANDLE_W = HANDLE_W0 * f; SPAD = { l: HANDLE_W + 4, r: SPAD0.r, t: SPAD0.t * f, b: SPAD0.b * f };
     const w = clampWindow(d, d.view || { xa: 0, xb: d.width - 1 });
     d.view = w;
     const W = canvas.clientWidth, H = canvas.clientHeight;
@@ -54,7 +62,7 @@ App.view = (() => {
   /** Fit the graticule, leaving room above for cursor tags and below for the Δt bracket. */
   function fitGridView(d) {
     const g = d.calib.grid, W = canvas.clientWidth, H = canvas.clientHeight;
-    const padX = 16, padTop = 34, padBottom = 34;
+    const padX = 16, padTop = 34 * F(), padBottom = 34 * F();
     const gw = g.right - g.left, gh = g.bottom - g.top;
     const scale = Math.min((W - 2 * padX) / gw, (H - padTop - padBottom) / gh);
     return { scale, ox: (W - gw * scale) / 2 - g.left * scale, oy: padTop + (H - padTop - padBottom - gh * scale) / 2 - g.top * scale, fitted: false };
@@ -113,14 +121,13 @@ App.view = (() => {
     if (v.series && !drag && hoverHandle) drawHandleTip(d, v);
   }
 
-  const HANDLE_W = 36;        // series 0-level handle: grip dots + channel name + arrow tip
   /** Screen positions of the series 0-level handles: [{id, y, out}] (out = -1/+1 if clamped above/below). */
   function seriesHandles(d, v) {
     const g = d.calib.grid, y0 = v.oy + g.top * v.ky, y1 = v.oy + g.bottom * v.ky, out = [];
     for (const col of d.series.cols) {
       const cc = d.calib.channels[col.id];
       if (!cc || !cc.on) continue;
-      const raw = v.oy + cc.zeroY * v.ky, y = App.util.clamp(raw, y0 + 6, y1 - 6);
+      const raw = v.oy + cc.zeroY * v.ky, y = App.util.clamp(raw, y0 + 6 * F(), y1 - 6 * F());
       out.push({ id: col.id, y, out: raw < y ? -1 : raw > y ? 1 : 0 });
     }
     return out;
@@ -128,7 +135,7 @@ App.view = (() => {
   function hitHandle(d, v, sx, sy) {
     if (!v.series || sx > SPAD.l + 1 || sx < SPAD.l - HANDLE_W - 2) return null;
     const hs = seriesHandles(d, v).reverse();   // topmost drawn first
-    const h = hs.find(h => Math.abs(h.y - sy) <= 8);
+    const h = hs.find(h => Math.abs(h.y - sy) <= 8 * F());
     return h ? h.id : null;
   }
 
@@ -161,35 +168,53 @@ App.view = (() => {
     }
     ctx.restore();
 
+    const f = F();
     // 0-level handles left of the grid (drag = offset, wheel = scale): grip dots, name, arrow tip
-    ctx.font = 'bold 10px system-ui, sans-serif'; ctx.textBaseline = 'middle';
-    const hl = x0 - HANDLE_W;
+    ctx.font = font(10, true); ctx.textBaseline = 'middle';
+    const hl = x0 - HANDLE_W, hh = 7 * f, tip = x0 - 1 - 7 * f;
     for (const h of seriesHandles(d, v)) {
       ctx.fillStyle = App.calib.channelById(h.id).color;
-      ctx.beginPath(); ctx.moveTo(hl, h.y - 7); ctx.lineTo(x0 - 8, h.y - 7); ctx.lineTo(x0 - 1, h.y); ctx.lineTo(x0 - 8, h.y + 7); ctx.lineTo(hl, h.y + 7); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(hl, h.y - hh); ctx.lineTo(tip, h.y - hh); ctx.lineTo(x0 - 1, h.y); ctx.lineTo(tip, h.y + hh); ctx.lineTo(hl, h.y + hh); ctx.closePath(); ctx.fill();
       const active = (drag && drag.type === 'offset' && drag.ch === h.id) || (!drag && hoverHandle === h.id);
       if (active) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke(); }
       ctx.fillStyle = '#0b0d10';
-      for (let r = -1; r <= 1; r++) for (const gx of [hl + 3, hl + 6]) ctx.fillRect(gx, h.y + r * 3 - 0.75, 1.5, 1.5);
-      ctx.fillText(h.out ? h.id.slice(1) + (h.out < 0 ? '↑' : '↓') : h.id, hl + 10, h.y + 0.5);
+      for (let r = -1; r <= 1; r++) for (const gx of [hl + 3 * f, hl + 6 * f]) ctx.fillRect(gx, h.y + (r * 3 - 0.75) * f, 1.5 * f, 1.5 * f);
+      ctx.fillText(h.out ? h.id.slice(1) + (h.out < 0 ? '↑' : '↓') : h.id, hl + 10 * f, h.y + 0.5);
     }
     // time labels under the grid lines (every 1st/2nd/5th line, whatever fits), legend top left
-    ctx.font = '11px system-ui, sans-serif'; ctx.textBaseline = 'top'; ctx.fillStyle = '#9aa3af';
+    ctx.font = font(11); ctx.textBaseline = 'top'; ctx.fillStyle = '#9aa3af';
     const lbl = k => fmt(k * tdiv, 's', 4), lw = Math.max(...[tA, tB].map(t => ctx.measureText(lbl(Math.round(t / tdiv))).width)) + 14;
     const pitch = lines.length > 1 ? lines[1].sx - lines[0].sx : Infinity, every = [1, 2, 5, 10].find(m => m * pitch >= lw) || 10;
     for (const ln of lines) {
       if (ln.k % every) continue;
       const txt = lbl(ln.k), w = ctx.measureText(txt).width;
       if (ln.sx - w / 2 < x0 - 20 || ln.sx + w / 2 > x1 + SPAD.r) continue;
-      ctx.fillText(txt, ln.sx - w / 2, y1 + 26);
+      ctx.fillText(txt, ln.sx - w / 2, y1 + 26 * f);
     }
     ctx.textBaseline = 'middle';
-    let lx = x0 + 6;
-    const item = (txt, col) => { const w = ctx.measureText(txt).width + 10; ctx.fillStyle = 'rgba(0,0,0,0.75)'; roundRect(lx - 3, y0 + 4, w, 17, 3); ctx.fill(); ctx.fillStyle = col; ctx.fillText(txt, lx + 2, y0 + 13); lx += w + 4; };
+    let lx = x0 + 6, ly = y0 + 4;   // wraps to a new row at the right edge
+    const item = (txt, col) => {
+      const w = ctx.measureText(txt).width + 10 * f;
+      if (lx > x0 + 6 && lx + w > x1 - 4) { lx = x0 + 6; ly += 19 * f; }
+      ctx.fillStyle = 'rgba(0,0,0,0.75)'; roundRect(lx - 3, ly, w, 17 * f, 3); ctx.fill(); ctx.fillStyle = col; ctx.fillText(txt, lx + 2 * f, ly + 9 * f); lx += w + 4;
+    };
     item(`${fmt(tdiv, 's', 3)}/div · ${fmt(1 / s.dt, 'Sa/s', 4)}`, '#e5e7eb');
     for (const col of s.cols) {
       const cc = c.channels[col.id];
       if (cc && cc.on) item(`${App.calib.chLabel(d, col.id)} ${fmt(cc.vdiv, cc.unit, 3)}/div`, App.calib.channelById(col.id).color);
+    }
+    // y axis labels in the colour of one channel (App.series.axisChannel), at the inner division lines (below the legend)
+    const ax = App.series.axisChannel(d);
+    if (ax) {
+      const ac = c.channels[ax];
+      ctx.font = font(11); ctx.textBaseline = 'middle';
+      for (let k = 1; k < g.vdiv; k++) {
+        const iy = g.top + (g.bottom - g.top) * k / g.vdiv, sy = toScreen(v, 0, iy)[1];
+        if (sy - 8 * f < ly + 17 * f + 2) continue;   // under the legend
+        const txt = fmt(snap0(App.calib.vAt(c, ax, iy), ac.vdiv), ac.unit, 3), w = ctx.measureText(txt).width + 8 * f;
+        ctx.fillStyle = 'rgba(0,0,0,0.75)'; roundRect(x0 + 3, sy - 8 * f, w, 16 * f, 3); ctx.fill();
+        ctx.fillStyle = App.calib.channelById(ax).color; ctx.fillText(txt, x0 + 3 + 4 * f, sy + 0.5);
+      }
     }
     ctx.restore();
   }
@@ -201,17 +226,18 @@ App.view = (() => {
     if (!h) return;
     const cc = d.calib.channels[h.id], x0 = SPAD.l, y0 = v.oy, y1 = toScreen(v, 0, d.calib.grid.bottom)[1];
     ctx.save();
+    const f = F();
     const lines = [
-      [`${App.calib.chLabel(d, h.id)} · ${App.util.formatSI(cc.vdiv, cc.unit, 3)}/div`, 'bold 12px system-ui, sans-serif', App.calib.channelById(h.id).color],
-      ['Scroll to change vertical scale', '12px system-ui, sans-serif', '#f3f4f6'],
-      ['Drag to move (Shift: no snapping)', '12px system-ui, sans-serif', '#b8c0cc'],
+      [`${App.calib.chLabel(d, h.id)} · ${App.util.formatSI(cc.vdiv, cc.unit, 3)}/div`, font(12, true), App.calib.channelById(h.id).color],
+      ['Scroll to change vertical scale', font(12), '#f3f4f6'],
+      ['Drag to move (Shift: no snapping)', font(12), '#b8c0cc'],
     ];
-    const w = Math.max(...lines.map(([t, f]) => { ctx.font = f; return ctx.measureText(t).width; })) + 16, lh = 17, H = lines.length * lh + 10;
+    const w = Math.max(...lines.map(([t, fnt]) => { ctx.font = fnt; return ctx.measureText(t).width; })) + 16 * f, lh = 17 * f, H = lines.length * lh + 10 * f;
     const x = x0 + 8, y = App.util.clamp(h.y - H / 2, y0 + 2, y1 - H - 2);
     ctx.fillStyle = 'rgba(13,16,20,0.95)'; ctx.strokeStyle = '#3e4858'; ctx.lineWidth = 1;
     roundRect(x + 0.5, y + 0.5, w, H, 5); ctx.fill(); ctx.stroke();
     ctx.textBaseline = 'middle';
-    lines.forEach(([t, f, col], i) => { ctx.font = f; ctx.fillStyle = col; ctx.fillText(t, x + 8, y + 5 + lh * i + lh / 2); });
+    lines.forEach(([t, fnt, col], i) => { ctx.font = fnt; ctx.fillStyle = col; ctx.fillText(t, x + 8 * f, y + 5 * f + lh * i + lh / 2); });
     ctx.restore();
   }
 
@@ -237,7 +263,7 @@ App.view = (() => {
     ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
 
     // time labels at each vertical line (bottom, inside the grid)
-    ctx.font = '11px system-ui, sans-serif'; ctx.textBaseline = 'bottom';
+    ctx.font = font(11); ctx.textBaseline = 'bottom';
     for (let k = 0; k <= g.hdiv; k++) {
       const ix = g.left + (g.right - g.left) * k / g.hdiv, sx = x0 + (x1 - x0) * k / g.hdiv;
       label(App.util.formatSI(snap0(App.calib.tAt(c, ix), c.time.tdiv), 's', 4), sx + 3, y1 - 3, OVERLAY_GRID);
@@ -255,7 +281,7 @@ App.view = (() => {
       for (let k = 0; k <= g.vdiv; k++) {
         const iy = g.top + (g.bottom - g.top) * k / g.vdiv, sy = y0 + (y1 - y0) * k / g.vdiv;
         const val = snap0(App.calib.vAt(c, gp.ids[0], iy), gp.vdiv);
-        label(`${k === 0 ? gp.ids.join('/') + ' ' : ''}${App.util.formatSI(val, gp.unit, 4)}`, x0 + 3 + gi * 92, sy + 2, gp.color);
+        label(`${k === 0 ? gp.ids.join('/') + ' ' : ''}${App.util.formatSI(val, gp.unit, 4)}`, x0 + 3 + gi * 92 * F(), sy + 2, gp.color);
       }
     });
 
@@ -294,9 +320,9 @@ App.view = (() => {
   // Floating-point residue like 1.9e-14 V on the 0 line -> 0.
   const snap0 = (val, perDiv) => (Math.abs(val) < Math.abs(perDiv) * 1e-6 ? 0 : val);
   function label(txt, x, y, color) {
-    const w = ctx.measureText(txt).width + 6;
+    const w = ctx.measureText(txt).width + 6, h = 14 * F();
     ctx.fillStyle = 'rgba(0,0,0,0.75)';
-    ctx.fillRect(x - 2, ctx.textBaseline === 'bottom' ? y - 13 : y - 1, w, 14);
+    ctx.fillRect(x - 2, ctx.textBaseline === 'bottom' ? y - h + 1 : y - 1, w, h);
     ctx.fillStyle = color; ctx.fillText(txt, x + 1, y);
   }
   function path(tr, v) {
@@ -316,7 +342,8 @@ App.view = (() => {
     const [, gy0] = toScreen(v, 0, g.top), [, gy1] = toScreen(v, 0, g.bottom);
     const ro = App.measure.cursorReadout(d);
     ctx.save();
-    ctx.font = '12px system-ui, sans-serif'; ctx.textBaseline = 'middle';
+    const f = F();
+    ctx.font = font(12); ctx.textBaseline = 'middle';
     // multi-period mode: dashed marks where the intermediate peaks should be, numbered 1..N
     const marks = App.measure.periodMarks(d);
     if (ro.periods) {
@@ -326,9 +353,9 @@ App.view = (() => {
       ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1;
       ctx.textAlign = 'center';
       marks.forEach((ix, k) => {
-        const [sx] = toScreen(v, ix, 0), txt = String(k + 1), w = ctx.measureText(txt).width + 8;
-        ctx.fillStyle = 'rgba(0,0,0,0.75)'; roundRect(sx - w / 2, gy0 + 3, w, 16, 3); ctx.fill();
-        ctx.fillStyle = PERIOD_COLOR; ctx.fillText(txt, sx, gy0 + 11.5);
+        const [sx] = toScreen(v, ix, 0), txt = String(k + 1), w = ctx.measureText(txt).width + 8 * f;
+        ctx.fillStyle = 'rgba(0,0,0,0.75)'; roundRect(sx - w / 2, gy0 + 3, w, 16 * f, 3); ctx.fill();
+        ctx.fillStyle = PERIOD_COLOR; ctx.fillText(txt, sx, gy0 + 3.5 + 8 * f);
       });
       ctx.textAlign = 'left';
     }
@@ -343,11 +370,11 @@ App.view = (() => {
       // off-screen cursor (zoomed in): tag pinned to the edge with an arrow
       const CW = canvas.clientWidth, off = sx < 0 ? -1 : sx > CW ? 1 : 0;
       const label = `${off < 0 ? '◀ ' : ''}${n}  ${App.util.formatSI(t, 's', 4)}${off > 0 ? ' ▶' : ''}`;
-      const tw = ctx.measureText(label).width + 12, th = 18;
+      const tw = ctx.measureText(label).width + 12 * f, th = 18 * f;
       const tx = off ? App.util.clamp(sx - tw / 2, 2, CW - tw - 2) : sx - tw / 2, ty = gy0 - th - 4;
       ctx.fillStyle = col; roundRect(tx, ty, tw, th, 4); ctx.fill();
       if (selected) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke(); }
-      ctx.fillStyle = '#0b0d10'; ctx.fillText(label, tx + 6, ty + th / 2 + 0.5);
+      ctx.fillStyle = '#0b0d10'; ctx.fillText(label, tx + 6 * f, ty + th / 2 + 0.5);
       // trace intersections
       for (const chr of ro.channels) {
         const val = n === 1 ? chr.a : chr.b;
@@ -358,27 +385,27 @@ App.view = (() => {
         ctx.strokeStyle = c.color; ctx.lineWidth = 3; ctx.globalAlpha = 0.5;
         ctx.beginPath(); ctx.moveTo(sx, syLo); ctx.lineTo(sx, syHi); ctx.stroke(); ctx.globalAlpha = 1;
         ctx.fillStyle = chr.alt ? '#000' : c.color; ctx.strokeStyle = chr.alt ? c.color : '#000'; ctx.lineWidth = chr.alt ? 2 : 1.5;
-        ctx.beginPath(); ctx.arc(sx, sy, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.arc(sx, sy, 4.5 * Math.sqrt(f), 0, Math.PI * 2); ctx.fill(); ctx.stroke();
         const txt = App.util.formatSI(val.v, chr.unit, 3);
-        const w = ctx.measureText(txt).width + 8, lx = n === 1 ? sx - w - 8 : sx + 8;
-        ctx.fillStyle = 'rgba(0,0,0,0.75)'; roundRect(lx, sy - 9, w, 18, 3); ctx.fill();
-        ctx.fillStyle = c.color; ctx.fillText(txt, lx + 4, sy + 0.5);
+        const w = ctx.measureText(txt).width + 8 * f, lx = n === 1 ? sx - w - 8 * f : sx + 8 * f;
+        ctx.fillStyle = 'rgba(0,0,0,0.75)'; roundRect(lx, sy - 9 * f, w, 18 * f, 3); ctx.fill();
+        ctx.fillStyle = c.color; ctx.fillText(txt, lx + 4 * f, sy + 0.5);
       }
     }
     // Δt bracket below the grid
     const [sx1] = toScreen(v, cur.x1, 0), [sx2] = toScreen(v, cur.x2, 0);
-    const by = gy1 + 14;
+    const by = gy1 + 14 * f, tk = 5 * f;
     ctx.strokeStyle = '#e5e7eb'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(sx1, by - 5); ctx.lineTo(sx1, by + 5); ctx.moveTo(sx1, by); ctx.lineTo(sx2, by); ctx.moveTo(sx2, by - 5); ctx.lineTo(sx2, by + 5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sx1, by - tk); ctx.lineTo(sx1, by + tk); ctx.moveTo(sx1, by); ctx.lineTo(sx2, by); ctx.moveTo(sx2, by - tk); ctx.lineTo(sx2, by + tk); ctx.stroke();
     const P = ro.periods;
     const dtTxt = P
       ? `Δt ${App.util.formatSI(ro.dt, 's', 4)} = ${P.n} × ${App.util.formatSI(P.period, 's', 4)}   f ${App.util.formatSI(P.freq, 'Hz', 5)}`
       : `Δt ${App.util.formatSI(ro.dt, 's', 4)}   1/Δt ${App.util.formatSI(ro.freq, 'Hz', 4)}`;
     // centred on the visible part of the bracket, kept on screen
     const CW = canvas.clientWidth, va = Math.max(Math.min(sx1, sx2), 0), vb = Math.min(Math.max(sx1, sx2), CW);
-    const w = ctx.measureText(dtTxt).width + 12, mx = App.util.clamp((va + vb) / 2 - w / 2, 2, Math.max(2, CW - w - 2));
-    ctx.fillStyle = 'rgba(15,17,21,0.9)'; roundRect(mx, by - 10, w, 20, 4); ctx.fill();
-    ctx.fillStyle = '#e5e7eb'; ctx.fillText(dtTxt, mx + 6, by + 0.5);
+    const w = ctx.measureText(dtTxt).width + 12 * f, mx = App.util.clamp((va + vb) / 2 - w / 2, 2, Math.max(2, CW - w - 2));
+    ctx.fillStyle = 'rgba(15,17,21,0.9)'; roundRect(mx, by - 10 * f, w, 20 * f, 4); ctx.fill();
+    ctx.fillStyle = '#e5e7eb'; ctx.fillText(dtTxt, mx + 6 * f, by + 0.5);
     ctx.restore();
   }
 
@@ -409,7 +436,7 @@ App.view = (() => {
   function hitCursor(d, v, sx, sy) {
     const g = d.calib.grid;
     const [, gy0] = toScreen(v, 0, g.top), [, gy1] = toScreen(v, 0, g.bottom);
-    if (sy < gy0 - 28 || sy > gy1 + 4) return 0;
+    if (sy < gy0 - 22 * F() - 6 || sy > gy1 + 4) return 0;
     let best = 0, bd = HIT_PX;
     for (const n of [1, 2]) {
       const [cx] = toScreen(v, n === 1 ? d.cursors.x1 : d.cursors.x2, 0);
@@ -441,7 +468,7 @@ App.view = (() => {
     }
     if (mode && mode.type === 'pick-grid' && e.button === 0) { drag = { type: 'grid', ix0: ix, iy0: iy, ix1: ix, iy1: iy }; return; }
     const hh = e.button === 0 && hitHandle(d, v, sx, sy);
-    if (hh) { drag = { type: 'offset', ch: hh, sy, z0: d.calib.channels[hh].zeroY }; canvas.style.cursor = 'ns-resize'; render(); return; }
+    if (hh) { d.axisCh = hh; drag = { type: 'offset', ch: hh, sy, z0: d.calib.channels[hh].zeroY }; canvas.style.cursor = 'ns-resize'; render(); return; }
     const n = e.button === 0 ? hitCursor(d, v, sx, sy) : 0;
     if (n) { drag = { type: 'cursor', n }; d.cursors.sel = n; canvas.style.cursor = 'ew-resize'; render(); return; }
     drag = { type: 'pan', sx, sy, ox: v.ox, oy: v.oy, xa: v.xa, xb: v.xb, kx: v.kx };
@@ -501,12 +528,21 @@ App.view = (() => {
     const hh = hitHandle(d, v, sx, sy);
     if (hh && e.deltaY) {
       const ch = d.calib.channels[hh];
+      d.axisCh = hh;
       App.series.setScale(d, hh, App.util.step125(ch.vdiv, e.deltaY < 0 ? -1 : 1), ch.zeroY);
       App.docs.touch(d, 'calib');
       return;
     }
     const f = Math.pow(1.0015, -e.deltaY * unit);
     zoomAt(v, sx, sy, f);
+  }
+
+  /** The plot as a PNG blob (full device resolution), drawn fresh without the hover tooltip. */
+  function toBlob() {
+    hoverHandle = null;
+    if (raf) { cancelAnimationFrame(raf); raf = 0; }
+    draw();
+    return new Promise(res => canvas.toBlob(res, 'image/png'));
   }
 
   function zoomAt(v, sx, sy, f) {
@@ -579,5 +615,5 @@ App.view = (() => {
     App.docs.touch(d, 'cursors');
   }
 
-  return { init, render, fit, fitGrid, zoom, nudge, selectCursor, setMode, getMode: () => mode, getWindow, setWindow, moveCursor, togglePeriods, stepPeriods, CURSOR_COLORS };
+  return { init, render, toBlob, fit, fitGrid, zoom, nudge, selectCursor, setMode, getMode: () => mode, getWindow, setWindow, moveCursor, togglePeriods, stepPeriods, CURSOR_COLORS };
 })();

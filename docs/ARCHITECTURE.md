@@ -41,6 +41,7 @@ A **doc** is one loaded screenshot (`js/state.js`):
 | `status` | yes | `{time:{tdiv,tCenter}, channels:{C1:{vdiv,zeroY}}, grid}` with `'ok'|'warn'|'manual'` |
 | `notes, raw` | yes | human-readable detection notes, raw OCR strings (shown in the panel) |
 | `chNames` | yes | `{C1: 'Vout', ...}` custom channel names (series: defaults from the CSV headers, `App.series.autoNames`); display them with `App.calib.chLabel(doc, id)` → `C1 (Vout)` |
+| `axisCh` | yes | series: channel whose values label the y axis, set by the last interaction (see `App.series.axisChannel`) |
 | `cursors` | yes | `{x1, x2, sel, periods, probe}`: `probe` = ids of the channels the cursors read (missing = default, see `App.measure.probedChannels`); cursor positions in **image px**, `sel` = keyboard target, `periods` = multi-period mode `{p0, x1}` (reference period and cursor-1 anchor in image px) or null |
 | `bitmap, imgData, traces, thumbUrl, view` | no | runtime caches, rebuilt on load (series: `series, thumbUrl, view = {xa, xb}`) |
 

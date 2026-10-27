@@ -173,6 +173,8 @@ try {
   Send-CdpMouse $sess 'mousePressed' $cb[0] $cb[1]; Send-CdpMouse $sess 'mouseReleased' $cb[0] $cb[1]
   $p1 = Invoke-CdpJs $sess 'App.measure.cursorReadout(App.docs.active()).channels.map(c => c.id).join(",") + "|" + document.querySelector("#probe-btns [data-probe=C2]").classList.contains("on")'
   Check 'probe chips: default one channel, click adds C2' (($p0 -eq 'C1') -and ($p1 -eq 'C1,C2|true')) "$p0 -> $p1"
+  $ax1 = Invoke-CdpJs $sess 'App.series.axisChannel(App.docs.active()) + "|" + document.querySelector("#calib [data-axis].axis").dataset.axis'
+  Check 'y axis labels follow the probe switched on last' ($ax1 -eq 'C2|C2') $ax1
   $rate = Invoke-CdpJs $sess 'document.querySelector("#calib .rate").textContent + " | " + document.getElementById("status-doc").textContent'
   Check 'sample rate shown' ($rate -match '1\.078 MSa/s.*1\.078 MSa/s') $rate
 
@@ -184,6 +186,8 @@ try {
   $z1 = Invoke-CdpJs $sess 'App.docs.active().calib.channels.C1.zeroY'
   $zExp = [math]::Round(($hp[3] + 50 / $hp[2]) / 100) * 100
   Check 'drag channel handle: offset snaps to division' ([math]::Abs($z1 - $zExp) -lt 1e-9) ("zeroY {0:N1} -> {1:N1} (expected {2})" -f $hp[3], $z1, $zExp)
+  $ax2 = Invoke-CdpJs $sess 'App.series.axisChannel(App.docs.active())'
+  Check 'y axis labels follow the dragged handle' ($ax2 -eq 'C1') $ax2
   $vd0 = Invoke-CdpJs $sess 'App.docs.active().calib.channels.C1.vdiv'
   Invoke-Cdp $sess 'Input.dispatchMouseEvent' @{ type = 'mouseWheel'; x = $hp[0]; y = ($hp[1] + 50); deltaX = 0; deltaY = -100 } | Out-Null
   Start-Sleep -Milliseconds 100
@@ -265,8 +269,29 @@ try {
   Start-Sleep -Milliseconds 100
   $lbl = Invoke-CdpJs $sess '[...document.querySelectorAll("#readout .chip")].map(e => e.textContent).join(",")'
   Check 'channel name shown in readout' ($lbl -eq 'C2 (Load current)') $lbl
+  $cc = Invoke-CdpJs $sess '(() => { const r = document.querySelector("#calib [data-axis=C4]").getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()'
+  Send-CdpMouse $sess 'mousePressed' $cc[0] $cc[1]; Send-CdpMouse $sess 'mouseReleased' $cc[0] $cc[1]
+  Start-Sleep -Milliseconds 100
+  $ax3 = Invoke-CdpJs $sess 'App.series.axisChannel(App.docs.active()) + "|" + document.querySelector("#calib [data-axis].axis").dataset.axis'
+  Check 'y axis labels: click on channel chip in Display' ($ax3 -eq 'C4|C4') $ax3
+  if ($ShotDir) { Save-CdpScreenshot $sess (Join-Path $ShotDir 'ui_csv_axis.png') }
   if ($ShotDir) { Save-CdpScreenshot $sess (Join-Path $ShotDir 'ui_csv_names.png') }
   Check 'display: scale change keeps centre value' (($c1[0] -eq 20) -and ([math]::Abs($c1[1] - $c0) -lt 1e-9)) "vdiv=$($c1[0]) centre $c0 -> $($c1[1])"
+
+  # screenshot mode (S): bigger canvas text and margins, handles still hit at their new place
+  Invoke-CdpJs $sess 'document.activeElement && document.activeElement.blur()' | Out-Null
+  Send-CdpKey $sess 's' 'KeyS' 83
+  Start-Sleep -Milliseconds 150
+  $bt = Invoke-CdpJs $sess '(() => { const d = App.docs.active(), r = document.getElementById("view").getBoundingClientRect(); return { on: App.ui.prefs.bigText && document.getElementById("tgl-bigtext").classList.contains("on"), x: r.left + 10, y: r.top + 34 * 1.8 + d.calib.channels.C1.zeroY * (r.height - 74 * 1.8) / 800 }; })()'
+  Send-CdpMouse $sess 'mouseMoved' $bt.x $bt.y
+  $bc = Invoke-CdpJs $sess 'document.getElementById("view").style.cursor'
+  Check 'screenshot mode on (S), scaled handle still hit' ($bt.on -and ($bc -eq 'ns-resize')) "on=$($bt.on) cursor=$bc"
+  if ($ShotDir) { Start-Sleep -Milliseconds 150; Save-CdpScreenshot $sess (Join-Path $ShotDir 'ui_csv_bigtext.png') }
+  $ci = Invoke-CdpJs $sess 'App.view.toBlob().then(b => createImageBitmap(b)).then(i => [i.width, i.height, document.getElementById("view").width, !!document.getElementById("btn-copyimg")])'
+  Check 'copy image: PNG of the plot at canvas resolution' (($ci[0] -eq $ci[2]) -and ($ci[1] -gt 200) -and $ci[3]) "$($ci[0])x$($ci[1])"
+  Send-CdpKey $sess 's' 'KeyS' 83
+  $bo = Invoke-CdpJs $sess 'App.ui.prefs.bigText'
+  Check 'screenshot mode off again' (-not $bo) "$bo"
 
   # reload restores series docs
   Start-Sleep -Milliseconds 900
