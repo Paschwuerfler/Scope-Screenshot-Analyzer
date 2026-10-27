@@ -1,7 +1,9 @@
 // Canvas view: draws the active screenshot plus overlays (calibration, extracted traces,
 // cursors) and handles mouse interaction.
 //
-// Coordinates: image px (ix, iy) <-> screen CSS px: sx = ox + ix * scale, sy = oy + iy * scale.
+// Coordinates: image px (ix, iy) <-> screen CSS px: sx = ox + ix * kx, sy = oy + iy * ky.
+// Screenshots: kx = ky = view.scale. Series (CSV) docs: ix = sample index, the graticule always
+// fills the canvas height and doc.view = { xa, xb } is the visible sample window (time-only zoom).
 // Per-doc zoom/pan lives in doc.view (runtime only).
 //
 // Mouse:  drag cursor line or its tag = move cursor | drag elsewhere = pan | wheel = zoom
@@ -20,8 +22,28 @@ App.view = (() => {
 
   // ---------------------------------------------------------------- transforms
   function viewOf(d) {
+    if (d.kind === 'series') return seriesView(d);
     if (!d.view) d.view = fitView(d);
     return d.view;
+  }
+  // series: plot margins (room for 0-level markers left, cursor tags above, Δt bracket below)
+  const SPAD = { l: 30, r: 14, t: 34, b: 40 };
+  function seriesView(d) {
+    const w = clampWindow(d, d.view || { xa: 0, xb: d.width - 1 });
+    d.view = w;
+    const W = canvas.clientWidth, H = canvas.clientHeight;
+    const kx = Math.max(1, W - SPAD.l - SPAD.r) / (w.xb - w.xa), ky = Math.max(1, H - SPAD.t - SPAD.b) / d.height;
+    return { kx, ky, ox: SPAD.l - w.xa * kx, oy: SPAD.t, xa: w.xa, xb: w.xb, scale: kx, series: true };
+  }
+  /** Keep the window inside the data and at least a few samples wide. */
+  function clampWindow(d, w) {
+    const n = d.width - 1, minW = Math.min(n, 8);
+    let xa = w.xa, xb = w.xb;
+    if (!(xb - xa >= minW)) { const c = (xa + xb) / 2; xa = c - minW / 2; xb = c + minW / 2; }
+    if (xb - xa > n) { xa = 0; xb = n; }
+    if (xa < 0) { xb -= xa; xa = 0; }
+    if (xb > n) { xa -= xb - n; xb = n; }
+    return { xa: Math.max(0, xa), xb };
   }
   function fitView(d) {
     const W = canvas.clientWidth, H = canvas.clientHeight, pad = 12;
@@ -36,8 +58,8 @@ App.view = (() => {
     const scale = Math.min((W - 2 * padX) / gw, (H - padTop - padBottom) / gh);
     return { scale, ox: (W - gw * scale) / 2 - g.left * scale, oy: padTop + (H - padTop - padBottom - gh * scale) / 2 - g.top * scale, fitted: false };
   }
-  const toScreen = (v, ix, iy) => [v.ox + ix * v.scale, v.oy + iy * v.scale];
-  const toImage = (v, sx, sy) => [(sx - v.ox) / v.scale, (sy - v.oy) / v.scale];
+  const toScreen = (v, ix, iy) => [v.ox + ix * (v.kx || v.scale), v.oy + iy * (v.ky || v.scale)];
+  const toImage = (v, sx, sy) => [(sx - v.ox) / (v.kx || v.scale), (sy - v.oy) / (v.ky || v.scale)];
 
   // ---------------------------------------------------------------- setup
   function init(el) {
@@ -64,7 +86,7 @@ App.view = (() => {
   }
 
   // ---------------------------------------------------------------- rendering
-  let raf = 0, lastScale = 0;
+  let raf = 0, lastScale = 0, lastWin = {};
   function render() { if (!raf) raf = requestAnimationFrame(draw); }
 
   function draw() {
@@ -74,13 +96,95 @@ App.view = (() => {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (!d) return;
     const v = viewOf(d);
-    if (v.scale !== lastScale) { lastScale = v.scale; App.events.emit('zoom', v.scale); }
-    ctx.imageSmoothingEnabled = v.scale < 2;
-    ctx.drawImage(d.bitmap, v.ox, v.oy, d.width * v.scale, d.height * v.scale);
-    if (prefs().showOverlay) drawOverlay(d, v);
+    const zoomLevel = v.series ? (d.width - 1) / (v.xb - v.xa) : v.scale;
+    if (zoomLevel !== lastScale) { lastScale = zoomLevel; App.events.emit('zoom', zoomLevel); }
+    if (v.series && (v.xa !== lastWin.xa || v.xb !== lastWin.xb)) { lastWin = { xa: v.xa, xb: v.xb }; App.events.emit('window', d); }
+    if (v.series) drawSeries(d, v);
+    else {
+      ctx.imageSmoothingEnabled = v.scale < 2;
+      ctx.drawImage(d.bitmap, v.ox, v.oy, d.width * v.scale, d.height * v.scale);
+      if (prefs().showOverlay) drawOverlay(d, v);
+    }
     drawCursors(d, v);
+    if (App.overview) App.overview.render();
     if (drag && drag.type === 'grid') drawGridDrag(v);
     if (mode && hover) drawPickHint(d, v);
+  }
+
+  /** Screen positions of the series 0-level handles: [{id, y, out}] (out = -1/+1 if clamped above/below). */
+  function seriesHandles(d, v) {
+    const g = d.calib.grid, y0 = v.oy + g.top * v.ky, y1 = v.oy + g.bottom * v.ky, out = [];
+    for (const col of d.series.cols) {
+      const cc = d.calib.channels[col.id];
+      if (!cc || !cc.on) continue;
+      const raw = v.oy + cc.zeroY * v.ky, y = App.util.clamp(raw, y0 + 6, y1 - 6);
+      out.push({ id: col.id, y, out: raw < y ? -1 : raw > y ? 1 : 0 });
+    }
+    return out;
+  }
+  function hitHandle(d, v, sx, sy) {
+    if (!v.series || sx > SPAD.l + 1 || sx < SPAD.l - 28) return null;
+    const hs = seriesHandles(d, v).reverse();   // topmost drawn first
+    const h = hs.find(h => Math.abs(h.y - sy) <= 8);
+    return h ? h.id : null;
+  }
+
+  // Series plot, scope style: time grid at multiples of a 1-2-5 time/div, 8 value divs, each
+  // channel with its own scale/div and 0-level handle, legend top left.
+  function drawSeries(d, v) {
+    const c = d.calib, s = d.series, g = c.grid, fmt = App.util.formatSI;
+    const [x0, y0] = [SPAD.l, v.oy], x1 = canvas.clientWidth - SPAD.r, y1 = toScreen(v, 0, g.bottom)[1];
+    ctx.save();
+    ctx.fillStyle = '#000'; ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+    // time grid pinned to absolute time (moves with zoom/pan), spacing jumps along 1-2-5
+    const tA = App.calib.tAt(c, v.xa), tB = App.calib.tAt(c, v.xb), tdiv = App.series.gridDiv(tB - tA);
+    const lines = [];
+    for (let k = Math.ceil(tA / tdiv); k * tdiv <= tB; k++) lines.push({ k, sx: v.ox + App.calib.xAt(c, k * tdiv) * v.kx });
+    ctx.strokeStyle = '#3a4049'; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
+    ctx.beginPath();
+    for (const ln of lines) { const sx = Math.round(ln.sx) + 0.5; ctx.moveTo(sx, y0); ctx.lineTo(sx, y1); }
+    for (let k = 1; k < g.vdiv; k++) { const sy = Math.round(y0 + (y1 - y0) * k / g.vdiv) + 0.5; ctx.moveTo(x0, sy); ctx.lineTo(x1, sy); }
+    ctx.stroke(); ctx.setLineDash([]);
+    ctx.strokeStyle = '#59616d'; ctx.strokeRect(x0 + 0.5, y0 + 0.5, x1 - x0 - 1, y1 - y0 - 1);
+
+    // traces, clipped to the graticule
+    ctx.save(); ctx.beginPath(); ctx.rect(x0, y0, x1 - x0, y1 - y0); ctx.clip();
+    ctx.lineWidth = 1.25; ctx.lineJoin = 'round';
+    for (const col of s.cols) {
+      const cc = c.channels[col.id];
+      if (!cc || !cc.on) continue;
+      ctx.strokeStyle = App.calib.channelById(col.id).color;
+      App.series.strokeColumn(ctx, col, v.xa, v.xb, i => v.ox + i * v.kx, val => v.oy + App.calib.yAt(c, col.id, val) * v.ky, x1 - x0);
+    }
+    ctx.restore();
+
+    // 0-level handles left of the grid (drag = offset, wheel = scale)
+    ctx.font = 'bold 10px system-ui, sans-serif'; ctx.textBaseline = 'middle';
+    for (const h of seriesHandles(d, v)) {
+      ctx.fillStyle = App.calib.channelById(h.id).color;
+      ctx.beginPath(); ctx.moveTo(x0 - 26, h.y - 7); ctx.lineTo(x0 - 8, h.y - 7); ctx.lineTo(x0 - 1, h.y); ctx.lineTo(x0 - 8, h.y + 7); ctx.lineTo(x0 - 26, h.y + 7); ctx.closePath(); ctx.fill();
+      if (drag && drag.type === 'offset' && drag.ch === h.id) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke(); }
+      ctx.fillStyle = '#0b0d10'; ctx.fillText(h.out ? h.id.slice(1) + (h.out < 0 ? '↑' : '↓') : h.id, x0 - 24, h.y + 0.5);
+    }
+    // time labels under the grid lines (every 1st/2nd/5th line, whatever fits), legend top left
+    ctx.font = '11px system-ui, sans-serif'; ctx.textBaseline = 'top'; ctx.fillStyle = '#9aa3af';
+    const lbl = k => fmt(k * tdiv, 's', 4), lw = Math.max(...[tA, tB].map(t => ctx.measureText(lbl(Math.round(t / tdiv))).width)) + 14;
+    const pitch = lines.length > 1 ? lines[1].sx - lines[0].sx : Infinity, every = [1, 2, 5, 10].find(m => m * pitch >= lw) || 10;
+    for (const ln of lines) {
+      if (ln.k % every) continue;
+      const txt = lbl(ln.k), w = ctx.measureText(txt).width;
+      if (ln.sx - w / 2 < x0 - 20 || ln.sx + w / 2 > x1 + SPAD.r) continue;
+      ctx.fillText(txt, ln.sx - w / 2, y1 + 26);
+    }
+    ctx.textBaseline = 'middle';
+    let lx = x0 + 6;
+    const item = (txt, col) => { const w = ctx.measureText(txt).width + 10; ctx.fillStyle = 'rgba(0,0,0,0.75)'; roundRect(lx - 3, y0 + 4, w, 17, 3); ctx.fill(); ctx.fillStyle = col; ctx.fillText(txt, lx + 2, y0 + 13); lx += w + 4; };
+    item(`${fmt(tdiv, 's', 3)}/div · ${fmt(1 / s.dt, 'Sa/s', 4)}`, '#e5e7eb');
+    for (const col of s.cols) {
+      const cc = c.channels[col.id];
+      if (cc && cc.on) item(`${col.id} ${fmt(cc.vdiv, cc.unit, 3)}/div`, App.calib.channelById(col.id).color);
+    }
+    ctx.restore();
   }
 
   // Detection overlay (sanity check): dims the screenshot and draws what the calibration and
@@ -208,9 +312,11 @@ App.view = (() => {
       ctx.beginPath(); ctx.moveTo(sx, gy0); ctx.lineTo(sx, gy1); ctx.stroke();
       // tag above the grid
       const t = n === 1 ? ro.t1 : ro.t2;
-      const label = `${n}  ${App.util.formatSI(t, 's', 4)}`;
+      // off-screen cursor (zoomed in): tag pinned to the edge with an arrow
+      const CW = canvas.clientWidth, off = sx < 0 ? -1 : sx > CW ? 1 : 0;
+      const label = `${off < 0 ? '◀ ' : ''}${n}  ${App.util.formatSI(t, 's', 4)}${off > 0 ? ' ▶' : ''}`;
       const tw = ctx.measureText(label).width + 12, th = 18;
-      const tx = sx - tw / 2, ty = gy0 - th - 4;
+      const tx = off ? App.util.clamp(sx - tw / 2, 2, CW - tw - 2) : sx - tw / 2, ty = gy0 - th - 4;
       ctx.fillStyle = col; roundRect(tx, ty, tw, th, 4); ctx.fill();
       if (selected) { ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke(); }
       ctx.fillStyle = '#0b0d10'; ctx.fillText(label, tx + 6, ty + th / 2 + 0.5);
@@ -225,12 +331,10 @@ App.view = (() => {
         ctx.beginPath(); ctx.moveTo(sx, syLo); ctx.lineTo(sx, syHi); ctx.stroke(); ctx.globalAlpha = 1;
         ctx.fillStyle = chr.alt ? '#000' : c.color; ctx.strokeStyle = chr.alt ? c.color : '#000'; ctx.lineWidth = chr.alt ? 2 : 1.5;
         ctx.beginPath(); ctx.arc(sx, sy, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-        if (prefs().showValueLabels) {
-          const txt = App.util.formatSI(val.v, chr.unit, 3);
-          const w = ctx.measureText(txt).width + 8, lx = n === 1 ? sx - w - 8 : sx + 8;
-          ctx.fillStyle = 'rgba(0,0,0,0.75)'; roundRect(lx, sy - 9, w, 18, 3); ctx.fill();
-          ctx.fillStyle = c.color; ctx.fillText(txt, lx + 4, sy + 0.5);
-        }
+        const txt = App.util.formatSI(val.v, chr.unit, 3);
+        const w = ctx.measureText(txt).width + 8, lx = n === 1 ? sx - w - 8 : sx + 8;
+        ctx.fillStyle = 'rgba(0,0,0,0.75)'; roundRect(lx, sy - 9, w, 18, 3); ctx.fill();
+        ctx.fillStyle = c.color; ctx.fillText(txt, lx + 4, sy + 0.5);
       }
     }
     // Δt bracket below the grid
@@ -242,7 +346,9 @@ App.view = (() => {
     const dtTxt = P
       ? `Δt ${App.util.formatSI(ro.dt, 's', 4)} = ${P.n} × ${App.util.formatSI(P.period, 's', 4)}   f ${App.util.formatSI(P.freq, 'Hz', 5)}`
       : `Δt ${App.util.formatSI(ro.dt, 's', 4)}   1/Δt ${App.util.formatSI(ro.freq, 'Hz', 4)}`;
-    const w = ctx.measureText(dtTxt).width + 12, mx = (sx1 + sx2) / 2 - w / 2;
+    // centred on the visible part of the bracket, kept on screen
+    const CW = canvas.clientWidth, va = Math.max(Math.min(sx1, sx2), 0), vb = Math.min(Math.max(sx1, sx2), CW);
+    const w = ctx.measureText(dtTxt).width + 12, mx = App.util.clamp((va + vb) / 2 - w / 2, 2, Math.max(2, CW - w - 2));
     ctx.fillStyle = 'rgba(15,17,21,0.9)'; roundRect(mx, by - 10, w, 20, 4); ctx.fill();
     ctx.fillStyle = '#e5e7eb'; ctx.fillText(dtTxt, mx + 6, by + 0.5);
     ctx.restore();
@@ -306,9 +412,11 @@ App.view = (() => {
       setMode(null); App.docs.touch(d, 'calib'); return;
     }
     if (mode && mode.type === 'pick-grid' && e.button === 0) { drag = { type: 'grid', ix0: ix, iy0: iy, ix1: ix, iy1: iy }; return; }
+    const hh = e.button === 0 && hitHandle(d, v, sx, sy);
+    if (hh) { drag = { type: 'offset', ch: hh, sy, z0: d.calib.channels[hh].zeroY }; canvas.style.cursor = 'ns-resize'; render(); return; }
     const n = e.button === 0 ? hitCursor(d, v, sx, sy) : 0;
     if (n) { drag = { type: 'cursor', n }; d.cursors.sel = n; canvas.style.cursor = 'ew-resize'; render(); return; }
-    drag = { type: 'pan', sx, sy, ox: v.ox, oy: v.oy };
+    drag = { type: 'pan', sx, sy, ox: v.ox, oy: v.oy, xa: v.xa, xb: v.xb, kx: v.kx };
     canvas.style.cursor = 'grabbing';
   }
 
@@ -318,9 +426,15 @@ App.view = (() => {
     hover = { ix, iy };
     App.events.emit('hover', { ix, iy });
     if (drag && drag.type === 'cursor') { setCursorX(d, drag.n, ix); App.events.emit('doc-updated', d, 'cursors'); }
+    else if (drag && drag.type === 'offset') {   // snaps to division lines; Shift = free
+      const raw = drag.z0 + (sy - drag.sy) / v.ky, ppd = App.calib.pxPerDivY(d.calib);
+      d.calib.channels[drag.ch].zeroY = e.shiftKey ? raw : Math.round(raw / ppd) * ppd;
+      App.events.emit('doc-updated', d, 'cursors');
+    }
+    else if (drag && drag.type === 'pan' && v.series) { const dx = (sx - drag.sx) / drag.kx; setWindow(d, drag.xa - dx, drag.xb - dx); }
     else if (drag && drag.type === 'pan') { v.ox = drag.ox + sx - drag.sx; v.oy = drag.oy + sy - drag.sy; v.fitted = false; }
     else if (drag && drag.type === 'grid') { drag.ix1 = ix; drag.iy1 = iy; }
-    else canvas.style.cursor = mode ? 'crosshair' : hitCursor(d, v, sx, sy) ? 'ew-resize' : 'grab';
+    else canvas.style.cursor = mode ? 'crosshair' : hitHandle(d, v, sx, sy) ? 'ns-resize' : hitCursor(d, v, sx, sy) ? 'ew-resize' : 'grab';
     render();
   }
 
@@ -328,6 +442,7 @@ App.view = (() => {
     const d = doc();
     if (drag && d) {
       if (drag.type === 'cursor') App.docs.touch(d, 'cursors');
+      if (drag.type === 'offset') App.docs.touch(d, 'calib');
       if (drag.type === 'grid') {
         const g = d.calib.grid;
         const l = Math.min(drag.ix0, drag.ix1), r = Math.max(drag.ix0, drag.ix1), t = Math.min(drag.iy0, drag.iy1), b = Math.max(drag.iy0, drag.iy1);
@@ -347,12 +462,28 @@ App.view = (() => {
   function onWheel(e) {
     const d = doc(); if (!d) return;
     e.preventDefault();
-    const v = viewOf(d), [sx, sy] = evPos(e);
-    const f = Math.pow(1.0015, -e.deltaY * (e.deltaMode === 1 ? 33 : 1));
+    const v = viewOf(d), [sx, sy] = evPos(e), unit = e.deltaMode === 1 ? 33 : 1;
+    // series: sideways scrolling (touchpad / Shift+wheel) pans the time axis
+    const side = e.shiftKey ? e.deltaY || e.deltaX : Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : 0;
+    if (v.series && side) { const dx = side * unit / v.kx; setWindow(d, v.xa + dx, v.xb + dx); return; }
+    // series: wheel over a channel handle steps its scale (1-2-5), 0 level stays put
+    const hh = hitHandle(d, v, sx, sy);
+    if (hh && e.deltaY) {
+      const ch = d.calib.channels[hh];
+      App.series.setScale(d, hh, App.util.step125(ch.vdiv, e.deltaY < 0 ? -1 : 1), ch.zeroY);
+      App.docs.touch(d, 'calib');
+      return;
+    }
+    const f = Math.pow(1.0015, -e.deltaY * unit);
     zoomAt(v, sx, sy, f);
   }
 
   function zoomAt(v, sx, sy, f) {
+    if (v.series) {   // time axis only, anchored at the pointer
+      const d = doc(), ix = (sx - v.ox) / v.kx;
+      setWindow(d, ix - (ix - v.xa) / f, ix + (v.xb - ix) / f);
+      return;
+    }
     const ns = App.util.clamp(v.scale * f, 0.05, 40);
     v.ox = sx - (sx - v.ox) * ns / v.scale; v.oy = sy - (sy - v.oy) * ns / v.scale; v.scale = ns; v.fitted = false;
     render();
@@ -370,14 +501,29 @@ App.view = (() => {
     mode = m; canvas.style.cursor = m ? 'crosshair' : 'grab';
     App.events.emit('mode', m); render();
   }
-  function fit() { const d = doc(); if (d) { d.view = fitView(d); render(); } }
-  function fitGrid() { const d = doc(); if (d) { d.view = fitGridView(d); render(); } }
+  function fit() { const d = doc(); if (d) { d.view = d.kind === 'series' ? null : fitView(d); render(); } }
+  function fitGrid() { const d = doc(); if (d) { d.view = d.kind === 'series' ? null : fitGridView(d); render(); } }
   function zoom(f) { const d = doc(); if (d) zoomAt(viewOf(d), canvas.clientWidth / 2, canvas.clientHeight / 2, f); }
+  /** Series docs: visible sample window (fractional sample indices). */
+  function getWindow(d) { return d && d.kind === 'series' ? (viewOf(d), d.view) : null; }
+  function setWindow(d, xa, xb) {
+    if (!d || d.kind !== 'series') return;
+    d.view = clampWindow(d, { xa, xb });
+    render();
+  }
   function nudge(dx) {
     const d = doc(); if (!d) return;
+    // series zoomed out: one arrow step = one screen pixel rather than one sample
+    if (d.kind === 'series') dx *= Math.max(1, 1 / viewOf(d).kx);
     const n = d.cursors.sel || 1;
     setCursorX(d, n, (n === 1 ? d.cursors.x1 : d.cursors.x2) + dx);
     App.docs.touch(d, 'cursors');
+  }
+  /** Move cursor n to image/sample x (used by the overview bar). final = drag ended -> save. */
+  function moveCursor(n, ix, final) {
+    const d = doc(); if (!d) return;
+    setCursorX(d, n, ix); d.cursors.sel = n;
+    if (final) App.docs.touch(d, 'cursors'); else App.events.emit('doc-updated', d, 'cursors');
   }
   function selectCursor(n) { const d = doc(); if (d) { d.cursors.sel = n; App.docs.touch(d, 'cursors'); } }
 
@@ -402,5 +548,5 @@ App.view = (() => {
     App.docs.touch(d, 'cursors');
   }
 
-  return { init, render, fit, fitGrid, zoom, nudge, selectCursor, setMode, getMode: () => mode, togglePeriods, stepPeriods, CURSOR_COLORS };
+  return { init, render, fit, fitGrid, zoom, nudge, selectCursor, setMode, getMode: () => mode, getWindow, setWindow, moveCursor, togglePeriods, stepPeriods, CURSOR_COLORS };
 })();

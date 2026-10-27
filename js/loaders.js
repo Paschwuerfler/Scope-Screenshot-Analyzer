@@ -1,26 +1,29 @@
 // Input paths: drag & drop (files and folders), clipboard paste, file / folder pickers,
-// session import. All roads lead to loadFiles().
+// session import. All roads lead to loadFiles(), which routes images to App.docs.addImage
+// and CSV/text waveform exports to App.docs.addSeries.
 App.loaders = (() => {
   const IMAGE_RE = /\.(png|jpe?g|bmp|gif|webp)$/i;
   const isImage = f => (f.type && f.type.startsWith('image/')) || IMAGE_RE.test(f.name || '');
 
-  /** Load a list of File/Blob objects (non-images are skipped). Activates the first new doc. */
+  const isSeries = f => !isImage(f) && App.series.isSeriesFile(f);
+
+  /** Load a list of File/Blob objects (images and CSV; others are skipped). Activates the first new doc. */
   async function loadFiles(files) {
-    const list = [...files].filter(isImage).sort((a, b) => App.util.naturalCompare(a.name || '', b.name || ''));
+    const list = [...files].filter(f => isImage(f) || isSeries(f)).sort((a, b) => App.util.naturalCompare(a.name || '', b.name || ''));
     const skipped = files.length - list.length;
-    if (!list.length) { App.events.emit('toast', skipped ? 'No images found in the dropped/selected files.' : 'Nothing to load.'); return; }
+    if (!list.length) { App.events.emit('toast', skipped ? 'No images or CSV files found in the dropped/selected files.' : 'Nothing to load.'); return; }
     App.events.emit('busy', true);
     let first = null;
     try {
       for (const f of list) {
         try {
-          const doc = await App.docs.addImage(f, f.name || 'image');
+          const doc = isSeries(f) ? await App.docs.addSeries(f, f.name || 'data.csv') : await App.docs.addImage(f, f.name || 'image');
           // Show the first new image immediately, keep loading the rest in the background.
           if (!first) { first = doc; App.docs.setActive(doc.id); }
         } catch (e) { console.error(e); App.events.emit('toast', `Could not load ${f.name}: ${e.message}`); }
       }
     } finally { App.events.emit('busy', false); }
-    if (skipped) App.events.emit('toast', `Skipped ${skipped} non-image file(s).`);
+    if (skipped) App.events.emit('toast', `Skipped ${skipped} file(s) that are neither images nor CSV.`);
   }
 
   // ---- folders via drag & drop (webkitGetAsEntry works in Chrome, Edge and Firefox)
@@ -59,13 +62,20 @@ App.loaders = (() => {
       await loadFiles(files.filter(f => !/\.json$/i.test(f.name)));
     });
 
-    // Paste anywhere (except into text inputs).
+    // Paste anywhere (except into text inputs): images, or CSV text (e.g. copied from Excel).
     window.addEventListener('paste', e => {
       if (e.target.closest && e.target.closest('input, textarea')) return;
-      const items = [...(e.clipboardData ? e.clipboardData.items : [])].filter(it => it.type.startsWith('image/'));
-      if (!items.length) { App.events.emit('toast', 'Clipboard contains no image.'); return; }
-      e.preventDefault();
       const stamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const items = [...(e.clipboardData ? e.clipboardData.items : [])].filter(it => it.type.startsWith('image/'));
+      if (!items.length) {
+        const text = e.clipboardData && e.clipboardData.getData('text/plain');
+        if (text && text.split('\n').length > 2) {
+          e.preventDefault();
+          loadFiles([new File([text], `Pasted ${stamp}.csv`, { type: 'text/csv' })]);
+        } else App.events.emit('toast', 'Clipboard contains no image or CSV data.');
+        return;
+      }
+      e.preventDefault();
       const files = items.map((it, i) => {
         const f = it.getAsFile();
         return new File([f], `Pasted ${stamp}${items.length > 1 ? ' #' + (i + 1) : ''}.png`, { type: f.type });
@@ -78,7 +88,7 @@ App.loaders = (() => {
   function pick(kind) {
     const inp = document.createElement('input');
     inp.type = 'file';
-    if (kind === 'files') { inp.multiple = true; inp.accept = 'image/*'; }
+    if (kind === 'files') { inp.multiple = true; inp.accept = 'image/*,.csv,.txt,.tsv,.dat'; }
     if (kind === 'folder') { inp.webkitdirectory = true; inp.multiple = true; }
     if (kind === 'session') inp.accept = '.json,application/json';
     inp.onchange = () => {

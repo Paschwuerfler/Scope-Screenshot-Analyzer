@@ -16,8 +16,10 @@
   --danger: #f87171;
   --strip-w: 190px;
   --panel-w: 360px;
-  --panel-h: 34vh;    /* narrow layout: max height of the cursors/calibration row */
+  --panel-h: 34vh;    /* narrow layout: height of the cursors/calibration row */
+  /* --panel-w / --panel-h are overridden inline when the user drags the splitter (App.ui prefs) */
   --thumb-w: 130px;   /* narrow layout: thumbnail width in the bottom bar */
+  --overview-h: 64px; /* CSV docs: height of the overview bar above the plot */
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -83,6 +85,14 @@ main { display: grid; grid-template-columns: var(--strip-w) 1fr var(--panel-w); 
 .stage-tools .sep { width: 1px; height: 18px; background: var(--line); margin: 0 6px; }
 .toggle.on { background: #0c4a6e; border-color: var(--accent); }
 .canvas-wrap { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.overview { position: relative; height: var(--overview-h); flex: none; display: none; border-bottom: 1px solid var(--line); }
+body.series .overview { display: block; }
+#overview { position: absolute; inset: 0; display: block; touch-action: none; }
+/* border between stage and panel: drag to resize (right edge here, bottom edge in the narrow layout) */
+.splitter { position: absolute; z-index: 6; top: 0; bottom: 0; right: -3px; width: 7px; cursor: col-resize; touch-action: none; }
+.splitter:hover, .splitter.active { background: rgba(56,189,248,.45); }
+body.empty .splitter { display: none; }
+body.series #tgl-overlay, body.series .stage-tools .sep { display: none; }
 #view { position: absolute; inset: 0; display: block; cursor: grab; touch-action: none; }
 
 .empty-state { position: absolute; inset: 40px 0 0 0; display: none; align-items: center; justify-content: center; }
@@ -98,7 +108,13 @@ body.busy #view { opacity: .6; }
 .panel { background: var(--bg-2); border-left: 1px solid var(--line); overflow-y: auto; padding: 8px; min-height: 0; }
 .card { background: var(--bg-3); border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin-bottom: 8px; }
 .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-.card-btns { display: flex; gap: 6px; }
+.card-btns { display: flex; gap: 6px; margin-left: auto; }
+.card-head { flex-wrap: wrap; row-gap: 6px; }
+.head-l { display: flex; align-items: center; gap: 10px; }
+.probe-btns { display: flex; gap: 4px; }
+.probe { font-size: 11px; font-weight: 700; padding: 0 7px; line-height: 17px; border-radius: 9px; border: 1.5px solid var(--c); background: transparent; color: var(--c); }
+.probe.on { background: var(--c); color: #0b0d10; }
+.probe:hover { border-color: var(--c); filter: brightness(1.15); }
 .card h3 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--fg-2); }
 .tip { font-size: 11.5px; margin: 8px 0 0; }
 
@@ -121,6 +137,7 @@ table.readout { width: 100%; border-collapse: collapse; font-variant-numeric: ta
 
 .layout-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
 .layout-name { flex: 1; font-weight: 600; }
+.layout-name.one-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .field { display: grid; grid-template-columns: 105px 1fr 18px; align-items: center; gap: 6px; margin-bottom: 5px; }
 .field label { color: var(--fg-2); }
 .ch-table { width: 100%; border-collapse: collapse; margin-top: 6px; }
@@ -153,10 +170,11 @@ details.raw pre { font-size: 10.5px; white-space: pre-wrap; word-break: break-al
   }
   .stage { grid-area: stage; }
   .panel {
-    grid-area: panel; display: flex; gap: 8px; max-height: var(--panel-h);
+    grid-area: panel; display: flex; gap: 8px; height: var(--panel-h);
     overflow: hidden; border-left: 0; border-top: 1px solid var(--line);
   }
   .panel .card { flex: 1 1 0; min-width: 0; overflow-y: auto; margin-bottom: 0; }
+  .splitter { top: auto; left: 0; right: 0; bottom: -3px; width: auto; height: 7px; cursor: row-resize; }
   .strip { grid-area: strip; flex-direction: row; border-right: 0; border-top: 1px solid var(--line); }
   .strip-head { flex-direction: column; justify-content: flex-start; gap: 2px; border-bottom: 0; border-right: 1px solid var(--line); }
   #strip-list { display: flex; gap: 6px; overflow-x: auto; overflow-y: hidden; }

@@ -3,6 +3,7 @@
 Measure directly on oscilloscope screenshots: the tool recognises the scope's screen layout,
 reads timebase, position, V/div and 0 V levels per channel, extracts the traces, and gives you
 two draggable cursors with Δt, 1/Δt, V at each cursor, ΔV and slew rate (ΔV/Δt).
+CSV waveform exports work too, with exact sample values and time-axis zoom.
 
 **▶ [Try it online with a demo screenshot](https://paschwuerfler.github.io/Scope-Screenshot-Analyzer/?demo)**
 · [open empty](https://paschwuerfler.github.io/Scope-Screenshot-Analyzer/)
@@ -21,7 +22,9 @@ folder. Screenshots you load never leave your computer, even in the online versi
 - **Open files** / **Open folder** buttons
 
 All loaded images appear in the strip on the left (in windows narrower than 3:2, the layout
-switches to rows: image on top, cursors and calibration below, the images as a bar at the bottom). Each image keeps its own cursors and
+switches to rows: image on top, cursors and calibration below, the images as a bar at the bottom).
+Drag the border between the image and the side panel to give either more room. Double-click
+the border to reset it. Each image keeps its own cursors and
 calibration, so you can switch freely (**↑/↓** or click a thumbnail). To rename an image,
 double-click its name, use the ✎ button on the thumbnail, or press **F2**
 (**Enter** saves, **Esc** cancels). The name is also used in copied readouts and exports.
@@ -30,8 +33,10 @@ double-click its name, use the ✎ button on the thumbnail, or press **F2**
 
 - Drag a cursor line (or its tag above the grid). **Double-click** moves the nearest cursor there.
 - **←/→** nudge the selected cursor by 1 px (**Shift** 10 px, **Alt** ¼ px). **1**/**2**/**Tab** select a cursor.
-- The **Cursors** panel shows t1, t2, Δt, 1/Δt and, for each active channel, the trace value at
-  both cursors, ΔV and ΔV/Δt. The small grey range under each value is the band the screenshot
+- The **Cursors** panel shows t1, t2, Δt, 1/Δt and, for each probed channel, the trace value at
+  both cursors, ΔV and ΔV/Δt. The colour-matched channel buttons next to the heading choose which
+  channels the cursors read. The default is one channel: the scope's selected channel, otherwise
+  the first active one. The small grey range under each value is the band the screenshot
   actually shows (trace thickness, sample blocks at fast timebases, persistence spread). Treat
   it as the reading's uncertainty.
 - **Copy** (or **C**) copies the readout as tab-separated text, ready to paste into Excel.
@@ -51,6 +56,37 @@ double-click its name, use the ✎ button on the thumbnail, or press **F2**
   line labelled with the time/voltage the calibration assigns to it (should match the scope's own
   grid and labels), each channel's 0 level, the extracted curve and its band. Use it to sanity-check
   a screenshot before trusting the numbers.
+
+## CSV waveform exports
+
+Scope waveform exports (`.csv`, `.txt`, `.tsv`) load like screenshots: drop them, open them, or
+paste CSV text with **Ctrl+V** (also copied Excel columns). The first column is time, up to four
+more columns become channels C1–C4. Headers like `C1 in V`, `CH2 [mA]` or `Current (A)` set
+names and units. Metadata lines at the top, `;`/tab separators and decimal commas are handled.
+
+LTspice waveform exports (File → Export data as text, `.txt`) work too: SPICE names such as
+`V(out)` or `I(R1)` become the channel names with unit V or A. Simulation time steps are not
+uniform, so the data is resampled linearly onto a uniform grid at the median step (a note in the
+Display panel says so). For a `.step` simulation only the first run is loaded.
+
+- The plot looks like a scope screen. Values at the cursors come straight from the samples
+  (interpolated between samples), so there is no uncertainty band.
+- **Wheel** zooms the **time axis only**, around the pointer. **Drag** empty plot area pans.
+  **Shift+wheel** or sideways touchpad scrolling also pans. **F** shows everything.
+  The time grid stays at round times and moves with the waveform. Its spacing jumps to the next
+  1-2-5 time/div as you zoom.
+- The **overview bar** above the plot shows the whole recording, with the visible part framed.
+  Drag the frame to pan and drag its edges to zoom. Drag a cursor line to move that cursor.
+  Click elsewhere to jump there, use the wheel to zoom, and double-click to show everything.
+- **Drag a channel's handle** (the coloured marker left of the plot, at its 0 level) up or down
+  to shift its offset. It snaps to the division lines; hold **Shift** to place it freely. The
+  **wheel over a handle** changes that channel's scale in 1-2-5 steps and keeps the 0 level in place.
+- The **Display** panel (in place of Calibration) shows samples, length and sample rate on one
+  line and sets the visible time/div and centre time. It also sets each channel's scale/div and centre value, or switches
+  a channel off. The **wheel** over a scale/div field steps through 1-2-5 (wheel up = larger
+  waveform), as do **↑/↓** in the field. **Auto scale** fits all channels again.
+- Cursors, Multi-period mode, Copy, rename, saving and export work as for screenshots. When
+  zoomed out, **←/→** move the cursor by one screen pixel instead of one sample.
 
 ## Checking / fixing the calibration
 

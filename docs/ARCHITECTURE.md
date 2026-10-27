@@ -15,10 +15,12 @@
         │                                    y per column
         ├─► default cursors
         └─► save to IndexedDB (debounced)                   App.store in js/state.js
+ App.docs.addSeries ──► parse CSV, auto scale               js/series.js (see "Series docs")
                     │
- events: docs-changed / active-changed / doc-updated / hover / zoom / mode / toast / busy
+ events: docs-changed / active-changed / doc-updated / hover / zoom / window / mode / toast / busy
                     ▼
- App.view (canvas: image + overlays + cursor interaction)   js/view.js
+ App.view (canvas: image or plot + overlays + cursors)      js/view.js
+ App.overview (CSV only: whole-recording bar above plot)    js/overview.js
  App.ui   (thumbnails, readout, calibration form, status)   js/ui.js
         └─ both read App.measure.cursorReadout(doc)         js/measure.js
 ```
@@ -33,13 +35,29 @@ A **doc** is one loaded screenshot (`js/state.js`):
 
 | Field | Persisted | Meaning |
 |---|---|---|
-| `id, name, kind ('image'), blob, width, height, addedAt` | yes | identity and source image |
+| `id, name, kind ('image' \| 'series'), blob, width, height, addedAt` | yes | identity and source (image, or CSV text for series) |
 | `layoutId, layoutName` | yes | detected layout, `null` = unknown (manual calibration) |
 | `calib` | yes | calibration, see below |
 | `status` | yes | `{time:{tdiv,tCenter}, channels:{C1:{vdiv,zeroY}}, grid}` with `'ok'|'warn'|'manual'` |
 | `notes, raw` | yes | human-readable detection notes, raw OCR strings (shown in the panel) |
-| `cursors` | yes | `{x1, x2, sel, periods}`: cursor positions in **image px**, `sel` = keyboard target, `periods` = multi-period mode `{p0, x1}` (reference period and cursor-1 anchor in image px) or null |
-| `bitmap, imgData, traces, thumbUrl, view` | no | runtime caches, rebuilt on load |
+| `cursors` | yes | `{x1, x2, sel, periods, probe}`: `probe` = ids of the channels the cursors read (missing = default, see `App.measure.probedChannels`); cursor positions in **image px**, `sel` = keyboard target, `periods` = multi-period mode `{p0, x1}` (reference period and cursor-1 anchor in image px) or null |
+| `bitmap, imgData, traces, thumbUrl, view` | no | runtime caches, rebuilt on load (series: `series, thumbUrl, view = {xa, xb}`) |
+
+### Series (CSV) docs
+
+`js/series.js` parses the CSV into `doc.series = { t0, dt, n, cols: [{id, name, unit, v}] }` and
+gives the doc a **virtual image**: x = sample index (`width = n`), y = a fixed 800 px graticule
+with 10 × 8 divs. `calib.time` maps sample index → time exactly; `calib.channels[ch].vdiv/zeroY`
+are the *display* scale and offset (set by Auto scale or the Display panel). Because of this,
+cursors (in sample index), the readout, multi-period mode and persistence are shared with
+screenshots unchanged. The only branches on `doc.kind === 'series'`:
+- `App.measure.valueAtX` / `traceToSeries` read the samples (linear interpolation), not pixels;
+- `App.view` draws a plot (`drawSeries`, min/max envelope per screen column via
+  `App.series.strokeColumn`) and uses separate x/y scales: the graticule always fills the
+  height, `doc.view = {xa, xb}` is the visible sample window (wheel zooms time only);
+- `js/overview.js` (`App.overview`) is the bar above the plot that pans/resizes that window;
+- `App.docs.analyze` = auto scale, `retrace` is a no-op, `hydrate` re-parses on restore/import;
+- `App.ui` shows the Display panel instead of the calibration form.
 
 `calib` (`js/calibrate.js`):
 ```js

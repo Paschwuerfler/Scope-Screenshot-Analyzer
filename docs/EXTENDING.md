@@ -61,15 +61,12 @@ set `doc.cursors.x1/x2` via `App.calib.xAt` and `App.docs.touch(doc, 'cursors')`
 
 ## Add time-series import (CSV etc.)
 
-Planned design so screenshot and data documents share the measurement UI:
-1. In `js/loaders.js` route `.csv/.txt` files to a new `App.docs.addSeries(file)`.
-2. New doc kind `'series'`: persisted fields `{ kind:'series', name, columns:[{name, unit}], data }`
-   (or the raw text). Runtime: parsed Float64Arrays.
-3. Rendering: a separate plot component (vendor `uPlot` into `lib/` with a pinned version, or a
-   canvas plot in a new `js/plot.js`). Cursors are then stored in **time** (s) rather than image px.
-   Generalise `doc.cursors` to `{ t1, t2 }` for series docs and let `App.measure.cursorReadout`
-   branch on `doc.kind`.
-4. `App.measure` functions then work on the parsed series directly.
+Implemented (see ARCHITECTURE.md, "Series (CSV) docs"). To support another export format, extend
+`App.series.parse` in `js/series.js`: it must return `{ t0, dt, n, cols: [{id, name, unit, v}] }`
+with uniform sampling (it resamples non-uniform time at the median step, max 4M points) and values
+in SI units. Headers go through `parseHeader` (scope style `C1 in V`, SPICE style `V(out)`);
+`readText` decodes UTF-16 files. `samples/csv/` holds example
+files; `tools/ui_test.ps1` loads them through a file input.
 
 ## Add or move a UI control
 

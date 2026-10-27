@@ -1,13 +1,13 @@
 // Documents (= loaded screenshots) and persistence.
 //
 // A doc has persisted fields (saved to IndexedDB, exported in sessions):
-//   { id, name, kind: 'image', blob, width, height, addedAt,
+//   { id, name, kind: 'image' | 'series', blob, width, height, addedAt,   // series: blob = CSV text, see js/series.js
 //     layoutId, layoutName,             // null = unknown layout (manual calibration)
 //     calib, status, notes, raw,        // see js/calibrate.js; status values 'ok'|'warn'|'manual'
 //     cursors: { x1, x2, sel, periods } } // cursor x positions in image px, sel = 1|2 (keyboard target),
 //                                       // periods = multi-period mode {p0, x1} or null (js/measure.js)
 // and runtime-only fields (rebuilt on load, never saved):
-//   { bitmap, imgData, traces, thumbUrl }
+//   { bitmap, imgData, traces, thumbUrl }  or for series { series, thumbUrl }
 //
 // Modules never mutate docs silently: call App.docs.update(doc, changes) or
 // App.docs.touch(doc) afterwards so views re-render and the doc is saved.
@@ -85,8 +85,17 @@ App.docs = (() => {
     return { bitmap, imgData: ctx.getImageData(0, 0, bitmap.width, bitmap.height) };
   }
 
-  /** Run layout detection + calibration on a doc (overwrites calib/status/notes). */
+  /** Run layout detection + calibration on a doc (overwrites calib/status/notes). Series: auto scale. */
   function analyze(doc) {
+    if (doc.kind === 'series') {
+      const s = doc.series, { calib, status } = App.series.autoCalib(s);
+      const span = App.util.formatSI((s.n - 1) * s.dt, 's');
+      Object.assign(doc, {
+        layoutId: 'csv', layoutName: `CSV · ${s.n.toLocaleString('en')} samples · ${span}`, calib, status, raw: {},
+        notes: [...s.notes, `Columns: ${s.cols.map(c => `${c.name} [${c.unit}] → ${c.id}`).join(', ')}.`],
+      });
+      return;
+    }
     const det = App.layouts.detect(doc.imgData);
     if (det.layout) {
       const r = det.layout.analyze(doc.imgData);
@@ -100,7 +109,20 @@ App.docs = (() => {
     }
   }
 
-  function retrace(doc) { doc.traces = App.traces.extract(doc.imgData, doc.calib); }
+  function retrace(doc) { doc.traces = doc.kind === 'series' ? null : App.traces.extract(doc.imgData, doc.calib); }
+
+  /** Rebuild runtime fields (bitmap/traces or parsed series, thumbnail) of a persisted record. */
+  async function hydrate(rec, blob = rec.blob) {
+    if (rec.kind === 'series') {
+      const doc = { ...rec, blob, series: App.series.parse(await App.series.readText(blob)) };
+      doc.thumbUrl = await App.series.thumbnail(doc);
+      return doc;
+    }
+    const doc = { ...rec, blob, ...(await decode(blob)) };
+    retrace(doc);
+    doc.thumbUrl = URL.createObjectURL(blob);
+    return doc;
+  }
 
   function defaultCursors(doc) {
     const g = doc.calib.grid, w = g.right - g.left;
@@ -121,6 +143,20 @@ App.docs = (() => {
     return doc;
   }
 
+  /** Add a time-series file (CSV text as Blob/File). Returns the doc. */
+  async function addSeries(blob, name) {
+    const series = App.series.parse(await App.series.readText(blob));
+    const doc = { id: App.util.uid(), name: name || 'data.csv', kind: 'series', blob, width: series.n, height: App.series.VH, addedAt: Date.now(), series };
+    analyze(doc);
+    retrace(doc);
+    doc.cursors = defaultCursors(doc);
+    doc.thumbUrl = await App.series.thumbnail(doc);
+    docs.push(doc);
+    save(doc);
+    App.events.emit('docs-changed');
+    return doc;
+  }
+
   /** Restore persisted docs on startup. */
   async function restore() {
     let recs = [], meta = null;
@@ -129,12 +165,7 @@ App.docs = (() => {
     const order = (meta && meta.order) || [];
     recs.sort((a, b) => (order.indexOf(a.id) + 1 || 1e9) - (order.indexOf(b.id) + 1 || 1e9) || a.addedAt - b.addedAt);
     for (const rec of recs) {
-      try {
-        const doc = { ...rec, ...(await decode(rec.blob)) };
-        retrace(doc);
-        doc.thumbUrl = URL.createObjectURL(rec.blob);
-        docs.push(doc);
-      } catch (e) { console.warn('could not restore', rec.name, e); }
+      try { docs.push(await hydrate(rec)); } catch (e) { console.warn('could not restore', rec.name, e); }
     }
     if (meta && meta.ui && App.ui) Object.assign(App.ui.prefs, meta.ui);
     activeId = meta && get(meta.activeId) ? meta.activeId : (docs[0] ? docs[0].id : null);
@@ -205,9 +236,7 @@ App.docs = (() => {
     let first = null;
     for (const rec of data.docs) {
       const blob = await (await fetch(rec.blob)).blob();
-      const doc = { ...rec, id: App.util.uid(), blob, ...(await decode(blob)) };
-      retrace(doc);
-      doc.thumbUrl = URL.createObjectURL(blob);
+      const doc = await hydrate({ ...rec, id: App.util.uid() }, blob);
       docs.push(doc); save(doc);
       first = first || doc;
     }
@@ -215,5 +244,5 @@ App.docs = (() => {
     if (first) setActive(first.id);
   }
 
-  return { list, get, active, setActive, step, addImage, restore, remove, rename, clear, touch, analyze, exportSession, importSession, isPersistent: () => persistenceOk };
+  return { list, get, active, setActive, step, addImage, addSeries, restore, remove, rename, clear, touch, analyze, exportSession, importSession, isPersistent: () => persistenceOk };
 })();

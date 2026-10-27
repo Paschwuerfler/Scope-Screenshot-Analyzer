@@ -12,10 +12,10 @@ new measurement, time-series import, UI controls). User guide: [README.md](READM
 ## Hard constraints
 - **Must keep working from `file://`**: classic `<script>` tags only (no ES modules, no `fetch`
   of local files, no workers loaded from files). New files must be added to the script list
-  in `index.html` (order matters: util → ocr → calibrate → layouts → traces → measure → state →
-  loaders → view → ui → app) and, if needed by tests, to `tools/test.html` / `tools/harvest.html`.
+  in `index.html` (order matters: util → ocr → calibrate → layouts → traces → series → measure →
+  state → loaders → view → overview → ui → app) and, if needed by tests, to `tools/test.html` / `tools/harvest.html`.
 - Everything hangs off the global `App` namespace (`App.util`, `App.ocr`, `App.calib`,
-  `App.layouts`, `App.traces`, `App.measure`, `App.store`, `App.docs`, `App.loaders`,
+  `App.layouts`, `App.traces`, `App.series`, `App.measure`, `App.store`, `App.docs`, `App.loaders`,
   `App.view`, `App.ui`, `App.events`). No globals besides `App` (and test-only `SAMPLES`).
 - No third-party libraries unless vendored into `lib/` with a pinned version. No CDNs (offline use).
 - Physical units internally are SI base units (s, V, Hz). Format only at display time with
@@ -28,7 +28,7 @@ new measurement, time-series import, UI controls). User guide: [README.md](READM
 ## Where to change what
 | Request | Place |
 |---|---|
-| Button placement, toolbar, panel layout | `index.html` (markup), `css/app.css` (grid: header / strip / stage / panel; widths `--strip-w`, `--panel-w`) |
+| Button placement, toolbar, panel layout | `index.html` (markup), `css/app.css` (grid: header / strip / stage / panel; widths `--strip-w`, `--panel-w`; rows below 3:2 aspect, `--panel-h`). The stage/panel splitter (`initSplitter` in `js/ui.js`) overrides `--panel-w/-h` and stores them in `App.ui.prefs` |
 | Keyboard shortcuts | `KEYS` in `js/app.js` + help table in `index.html` |
 | Cursor look, dragging, hit areas, zoom/pan, pick modes | `js/view.js` |
 | Readout table / calibration form / thumbnails / status bar | `js/ui.js` |
@@ -37,6 +37,7 @@ new measurement, time-series import, UI controls). User guide: [README.md](READM
 | Scope layout detection / OCR regions | `js/layouts/<scope>.js`, registry `js/layouts/index.js` |
 | OCR engine / glyphs | `js/ocr.js`; glyphs are generated, see below |
 | Loading inputs (drop, paste, pickers) | `js/loaders.js` |
+| CSV parsing, auto scale, plot drawing helpers | `js/series.js`; plot + time-only zoom in `js/view.js`, overview bar `js/overview.js` |
 | Persistence, export/import | `js/state.js` |
 
 ## Verify every change

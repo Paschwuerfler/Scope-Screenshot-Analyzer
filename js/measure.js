@@ -5,6 +5,10 @@ App.measure = (() => {
 
   /** Convert an extracted screenshot trace into a series {t: Float64Array, v: Float64Array} (NaN-free). */
   function traceToSeries(doc, chId) {
+    if (doc.kind === 'series') {
+      const s = doc.series, col = s.cols.find(c => c.id === chId);
+      return col ? { t: Float64Array.from({ length: s.n }, (_, i) => s.t0 + i * s.dt), v: Float64Array.from(col.v) } : null;
+    }
     const tr = doc.traces && doc.traces[chId];
     if (!tr) return null;
     const t = [], v = [];
@@ -20,11 +24,26 @@ App.measure = (() => {
    * alt = true reads the second branch of a split persistence trace.
    */
   function valueAtX(doc, chId, x, alt = false) {
+    if (doc.kind === 'series') {   // exact sample data, x = fractional sample index
+      const v = alt ? null : App.series.valueAt(doc.series, chId, x);
+      return v === null ? null : { v, vMin: v, vMax: v };
+    }
     const tr = doc.traces && doc.traces[chId];
     const p = App.traces.yAt(tr && (alt ? tr.alt : tr), x);
     if (!p) return null;
     const c = doc.calib;
     return { v: C.vAt(c, chId, p.mid), vMin: C.vAt(c, chId, p.hi), vMax: C.vAt(c, chId, p.lo) };
+  }
+
+  /**
+   * Channels the cursors probe (shown in readout, on the canvas, in Copy). doc.cursors.probe is
+   * the user's choice (array of ids); default = the scope's selected channel, else the first one on.
+   */
+  function probedChannels(doc) {
+    const c = doc.calib, on = C.CHANNELS.map(ch => ch.id).filter(id => c.channels[id] && c.channels[id].on);
+    const p = doc.cursors && doc.cursors.probe;
+    if (Array.isArray(p)) return on.filter(id => p.includes(id));
+    return [on.includes(c.selected) ? c.selected : on[0]].filter(Boolean);
   }
 
   /**
@@ -35,10 +54,10 @@ App.measure = (() => {
   function cursorReadout(doc) {
     const c = doc.calib, cur = doc.cursors;
     const t1 = C.tAt(c, cur.x1), t2 = C.tAt(c, cur.x2), dt = t2 - t1;
-    const channels = [];
+    const channels = [], probed = probedChannels(doc);
     for (const ch of C.CHANNELS) {
       const cc = c.channels[ch.id];
-      if (!cc || !cc.on) continue;
+      if (!cc || !cc.on || !probed.includes(ch.id)) continue;
       const entry = alt => {
         const a = valueAtX(doc, ch.id, cur.x1, alt), b = valueAtX(doc, ch.id, cur.x2, alt);
         const v1 = a ? a.v : null, v2 = b ? b.v : null;
@@ -100,5 +119,5 @@ App.measure = (() => {
     return { n, period: adt / n, freq: adt ? n / adt : null, channels };
   }
 
-  return { traceToSeries, valueAtX, cursorReadout, periodCount, periodMarks };
+  return { traceToSeries, valueAtX, probedChannels, cursorReadout, periodCount, periodMarks };
 })();

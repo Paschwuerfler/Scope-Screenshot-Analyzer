@@ -82,6 +82,15 @@ App.util = (() => {
     return { h, s: max === 0 ? 0 : d / max, v: max / 255 };
   }
 
+  /** Next value in the 1-2-5 sequence above (dir > 0) or below (dir < 0) v, like a scope's scale knob. */
+  function step125(v, dir) {
+    const e = Math.pow(10, Math.floor(Math.log10(v) + 1e-9)), m = v / e;
+    const seq = [1, 2, 5, 10], eps = 1e-6;
+    if (dir > 0) return (seq.find(s => s > m + eps) || 20) * e;
+    const below = seq.filter(s => s < m - eps);
+    return (below.length ? below[below.length - 1] : 0.5) * e;
+  }
+
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const median = (arr) => {
     if (!arr.length) return NaN;
@@ -103,7 +112,7 @@ App.util = (() => {
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
-  return { formatSI, formatRange, formatRate, parseSI, rgb2hsv, clamp, median, uid, naturalCompare, debounce, escapeHtml };
+  return { formatSI, formatRange, formatRate, parseSI, rgb2hsv, step125, clamp, median, uid, naturalCompare, debounce, escapeHtml };
 })();
 
 /** Tiny pub/sub used to decouple modules: App.events.on('doc-updated', fn) / emit(...). */

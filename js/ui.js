@@ -3,7 +3,7 @@
 App.ui = (() => {
   const { formatSI, formatRange, formatRate, parseSI, escapeHtml: esc } = App.util;
   const $ = sel => document.querySelector(sel);
-  const prefs = { showOverlay: false, showValueLabels: true };
+  const prefs = { showOverlay: false, panelW: null, panelH: null };   // panelW/H: splitter positions (px), null = CSS default
 
   // ---------------------------------------------------------------- status badges
   const BADGE = { ok: ['✓', 'ok', 'Detected automatically, sources agree'], warn: ['!', 'warn', 'Uncertain — please check'], manual: ['✎', 'manual', 'Set manually'] };
@@ -62,9 +62,25 @@ App.ui = (() => {
   }
 
   // ---------------------------------------------------------------- readout
+  /** Colour-matched toggles next to the "Cursors" heading: which channels the cursors read. */
+  function renderProbes(d) {
+    const box = $('#probe-btns');
+    if (!d) { box.innerHTML = ''; return; }
+    const probed = App.measure.probedChannels(d);
+    box.innerHTML = App.calib.CHANNELS.filter(ch => d.calib.channels[ch.id] && d.calib.channels[ch.id].on).map(ch =>
+      `<button class="probe ${probed.includes(ch.id) ? 'on' : ''}" data-probe="${ch.id}" style="--c:${ch.color}" title="Read ${ch.id} at the cursors">${ch.id}</button>`).join('');
+  }
+  function toggleProbe(id) {
+    const d = App.docs.active(); if (!d) return;
+    const p = App.measure.probedChannels(d);
+    d.cursors.probe = p.includes(id) ? p.filter(x => x !== id) : [...p, id];
+    App.docs.touch(d, 'cursors');
+  }
+
   function renderReadout() {
     const d = App.docs.active(), box = $('#readout');
     $('#tgl-periods').classList.toggle('on', !!(d && d.cursors.periods));
+    renderProbes(d);
     if (!d) { box.innerHTML = '<p class="muted">No image loaded.</p>'; return; }
     const ro = App.measure.cursorReadout(d);
     const C = App.view.CURSOR_COLORS;
@@ -112,7 +128,9 @@ App.ui = (() => {
   // ---------------------------------------------------------------- calibration editor
   function renderCalib() {
     const d = App.docs.active(), box = $('#calib');
+    $('#calib-title').textContent = d && d.kind === 'series' ? 'Display' : 'Calibration';
     if (!d) { box.innerHTML = ''; return; }
+    if (d.kind === 'series') { box.innerHTML = seriesDisplayHtml(d); return; }
     const c = d.calib, st = d.status;
     const g = c.grid;
     let html = `
@@ -147,10 +165,83 @@ App.ui = (() => {
     box.innerHTML = html;
   }
 
+  // Series (CSV) docs: the time axis comes from the file; the panel sets what is displayed:
+  // visible window (time/div, centre) and per channel scale/div and the value at the grid centre.
+  const centreOf = (c, id) => App.calib.vAt(c, id, (c.grid.top + c.grid.bottom) / 2);
+  function seriesWindow(d) {
+    const w = App.view.getWindow(d), s = d.series;
+    return { tdiv: App.series.gridDiv((w.xb - w.xa) * s.dt), tCenter: App.calib.tAt(d.calib, (w.xa + w.xb) / 2) };
+  }
+  function seriesDisplayHtml(d) {
+    const c = d.calib, w = seriesWindow(d);
+    let html = `
+      <div class="layout-row"><span class="layout-name one-line" title="CSV: ${d.series.n.toLocaleString('en')} samples, ${esc(formatSI((d.series.n - 1) * d.series.dt, 's'))} long, ${esc(formatSI(d.series.dt, 's'))} per sample">${d.series.n.toLocaleString('en')} Sa · ${esc(formatSI((d.series.n - 1) * d.series.dt, 's'))} · <span class="rate">${esc(App.series.rateText(d.series))}</span></span>
+        <button id="btn-redetect" class="small" title="Reset all channel scales to fit the data">Auto scale</button></div>
+      <div class="field"><label>Time / div</label><input data-w="tdiv" value="${esc(formatSI(w.tdiv, 's'))}"><span></span></div>
+      <div class="field"><label>Time at centre</label><input data-w="tCenter" value="${esc(formatSI(w.tCenter, 's'))}"><span></span></div>
+      <table class="ch-table"><tr><th>Ch</th><th>On</th><th>Scale / div</th><th>Centre value</th></tr>`;
+    for (const col of d.series.cols) {
+      const cc = c.channels[col.id], color = App.calib.channelById(col.id).color;
+      html += `<tr class="${cc.on ? '' : 'off'}">
+        <td><span class="chip" style="--c:${color}" title="${esc(col.name)} [${esc(col.unit)}]">${col.id}</span></td>
+        <td><input type="checkbox" data-on="${col.id}" ${cc.on ? 'checked' : ''}></td>
+        <td><input data-vdiv="${col.id}" value="${esc(formatSI(cc.vdiv, cc.unit))}" title="Wheel or ↑/↓: 1-2-5 steps" ${cc.on ? '' : 'disabled'}></td>
+        <td><input data-centre="${col.id}" value="${esc(formatSI(centreOf(c, col.id), cc.unit))}" ${cc.on ? '' : 'disabled'}></td></tr>`;
+    }
+    html += '</table>';
+    if (d.notes && d.notes.length) html += `<ul class="notes series-notes">${d.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>`;
+    return html;
+  }
+  /** Keep the time/div + centre fields in step with zoom/pan (unless the user is typing in them). */
+  function syncSeriesWindow() {
+    const d = App.docs.active(); if (!d || d.kind !== 'series') return;
+    const w = seriesWindow(d);
+    for (const k of ['tdiv', 'tCenter']) {
+      const el = document.querySelector(`#calib [data-w="${k}"]`);
+      if (el && el !== document.activeElement) el.value = formatSI(w[k], 's');
+    }
+  }
+
+  function onSeriesChange(d, t, bad) {
+    const c = d.calib, s = d.series, ppd = App.calib.pxPerDivY(c), cy = (c.grid.top + c.grid.bottom) / 2;
+    if (t.dataset.w) {
+      const p = parseSI(t.value, 's'), w = seriesWindow(d);
+      if (!p || (t.dataset.w === 'tdiv' && p.value <= 0)) return bad();
+      w[t.dataset.w] = p.value;
+      const half = w.tdiv * 10 / s.dt / 2, mid = App.calib.xAt(c, w.tCenter);
+      App.view.setWindow(d, mid - half, mid + half);
+      syncSeriesWindow();
+    } else if (t.dataset.on) {
+      c.channels[t.dataset.on].on = t.checked;
+      App.docs.touch(d, 'calib');
+    } else if (t.dataset.vdiv) {   // keep the centre value while rescaling, like a scope
+      const p = parseSI(t.value, null);
+      if (!p || p.value <= 0) return bad();
+      App.series.setScale(d, t.dataset.vdiv, p.value, cy);
+      App.docs.touch(d, 'calib');
+    } else if (t.dataset.centre) {
+      const ch = c.channels[t.dataset.centre], p = parseSI(t.value, ch.unit);
+      if (!p) return bad();
+      ch.zeroY = cy + p.value / ch.vdiv * ppd;
+      App.docs.touch(d, 'calib');
+    }
+  }
+
+  /** Series: step a channel's scale/div through 1-2-5 (dir +1 = coarser). Keeps the centre value. */
+  function stepSeriesScale(id, dir) {
+    const d = App.docs.active(); if (!d || d.kind !== 'series') return;
+    const ch = d.calib.channels[id]; if (!ch || !ch.on) return;
+    App.series.setScale(d, id, App.util.step125(ch.vdiv, dir));
+    App.docs.touch(d, 'calib');
+    const inp = document.querySelector(`#calib [data-vdiv="${id}"]`);
+    if (inp) inp.focus();
+  }
+
   function onCalibChange(e) {
     const d = App.docs.active(); if (!d) return;
     const t = e.target, c = d.calib, st = d.status;
     const bad = () => { t.classList.add('invalid'); setTimeout(renderCalib, 900); };
+    if (d.kind === 'series') return onSeriesChange(d, t, bad);
     if (t.dataset.k) {
       const p = parseSI(t.value, 's');
       if (!p || (t.dataset.k === 'tdiv' && p.value <= 0)) return bad();
@@ -188,7 +279,7 @@ App.ui = (() => {
   // ---------------------------------------------------------------- status bar
   function renderStatus(h) {
     const d = App.docs.active();
-    $('#status-doc').textContent = d ? `${d.name} — ${d.width}×${d.height}` : '';
+    $('#status-doc').textContent = !d ? '' : d.kind === 'series' ? `${d.name} — ${d.width.toLocaleString('en')} samples @ ${formatSI(1 / d.series.dt, 'Sa/s')}` : `${d.name} — ${d.width}×${d.height}`;
     if (!d || !h) { $('#status-hover').innerHTML = ''; return; }
     const t = App.calib.tAt(d.calib, h.ix);
     let s = `<span>t = ${formatSI(t, 's')}</span>`;
@@ -211,15 +302,41 @@ App.ui = (() => {
   function renderAll() {
     const d = App.docs.active();
     document.body.classList.toggle('empty', !App.docs.list().length);
+    document.body.classList.toggle('series', !!(d && d.kind === 'series'));
     renderStrip(); renderReadout(); renderCalib(); renderStatus(null);
-    syncToggles();
+    syncToggles(); applyPanelSize();
     App.view.render();
     if (!d) return;
   }
 
+  // ---------------------------------------------------------------- splitter (stage | panel)
+  const isNarrow = () => window.matchMedia('(max-aspect-ratio: 3/2)').matches;
+  function applyPanelSize() {
+    const st = document.documentElement.style;
+    if (prefs.panelW) st.setProperty('--panel-w', prefs.panelW + 'px'); else st.removeProperty('--panel-w');
+    if (prefs.panelH) st.setProperty('--panel-h', prefs.panelH + 'px'); else st.removeProperty('--panel-h');
+  }
+  function initSplitter() {
+    const sp = $('#splitter');
+    let active = false;
+    sp.addEventListener('pointerdown', e => { if (e.button === 0) { active = true; sp.setPointerCapture(e.pointerId); sp.classList.add('active'); } });
+    sp.addEventListener('pointermove', e => {
+      if (!active) return;
+      const main = $('main').getBoundingClientRect();
+      if (isNarrow()) {
+        const bottom = $('.strip').getBoundingClientRect().top;
+        prefs.panelH = Math.round(App.util.clamp(bottom - e.clientY, 100, main.height - 200));
+      } else prefs.panelW = Math.round(App.util.clamp(main.right - e.clientX, 260, main.width * 0.6));
+      applyPanelSize();
+    });
+    const end = () => { if (!active) return; active = false; sp.classList.remove('active'); App.docs.touch(App.docs.active() || null, 'prefs'); };
+    sp.addEventListener('pointerup', end);
+    sp.addEventListener('pointercancel', end);
+    sp.addEventListener('dblclick', () => { prefs.panelW = prefs.panelH = null; applyPanelSize(); App.docs.touch(App.docs.active() || null, 'prefs'); });
+  }
+
   function syncToggles() {
     $('#tgl-overlay').classList.toggle('on', prefs.showOverlay);
-    $('#tgl-labels').classList.toggle('on', prefs.showValueLabels);
   }
 
   function togglePref(k) { prefs[k] = !prefs[k]; syncToggles(); App.view.render(); App.docs.touch(App.docs.active() || null, 'prefs'); }
@@ -243,11 +360,23 @@ App.ui = (() => {
       const li = e.target.closest('.thumb');
       if (li && e.target.closest('.thumb-meta')) startRename(li.dataset.id);
     });
+    initSplitter();
+    $('#probe-btns').addEventListener('click', e => { const b = e.target.closest('[data-probe]'); if (b) toggleProbe(b.dataset.probe); });
     $('#calib').addEventListener('change', onCalibChange);
-    $('#calib').addEventListener('keydown', e => { if (e.key === 'Enter') e.target.blur(); });
+    $('#calib').addEventListener('keydown', e => {
+      if (e.key === 'Enter') e.target.blur();
+      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && e.target.dataset.vdiv && App.docs.active().kind === 'series') {
+        e.preventDefault(); stepSeriesScale(e.target.dataset.vdiv, e.key === 'ArrowUp' ? 1 : -1);
+      }
+    });
+    $('#calib').addEventListener('wheel', e => {
+      const t = e.target.closest && e.target.closest('[data-vdiv]');
+      if (!t || t.disabled || App.docs.active().kind !== 'series' || !e.deltaY) return;
+      e.preventDefault(); stepSeriesScale(t.dataset.vdiv, e.deltaY < 0 ? -1 : 1);
+    }, { passive: false });
     $('#calib').addEventListener('click', e => {
       const d = App.docs.active(); if (!d) return;
-      if (e.target.id === 'btn-redetect') { App.docs.touch(d, 'detect'); toast('Detection re-run.'); }
+      if (e.target.id === 'btn-redetect') { App.docs.touch(d, 'detect'); toast(d.kind === 'series' ? 'Scales reset to fit the data.' : 'Detection re-run.'); }
       if (e.target.id === 'btn-pickgrid') { App.view.setMode({ type: 'pick-grid' }); toast('Drag a rectangle over the graticule (outer grid border).'); }
       const pz = e.target.closest('[data-pickzero]');
       if (pz) { App.view.setMode({ type: 'pick-zero', ch: pz.dataset.pickzero }); toast(`Click on the image at the 0 level of ${pz.dataset.pickzero}.`); }
@@ -266,6 +395,7 @@ App.ui = (() => {
       App.view.render();
     });
     App.events.on('hover', renderStatus);
+    App.events.on('window', syncSeriesWindow);
     App.events.on('toast', toast);
     App.events.on('zoom', s => { $('#zoom-level').textContent = Math.round(s * 100) + '%'; });
     App.events.on('mode', m => { document.body.classList.toggle('picking', !!m); });

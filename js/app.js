@@ -20,7 +20,6 @@
     '=': () => App.view.zoom(1.25),
     '-': () => App.view.zoom(0.8),
     'd': () => App.ui.togglePref('showOverlay'),
-    'l': () => App.ui.togglePref('showValueLabels'),
     'c': e => { if (!e.ctrlKey && !e.metaKey) copyReadout(); else return false; },
     'p': () => App.view.togglePeriods(),
     ',': () => App.view.stepPeriods(-1),
@@ -62,6 +61,7 @@
     window.addEventListener('error', e => App.ui.toast('Error: ' + e.message));
     window.addEventListener('unhandledrejection', e => App.ui.toast('Error: ' + (e.reason && e.reason.message || e.reason)));
     App.view.init($('#view'));
+    App.overview.init($('#overview'));
     App.ui.init();
     App.loaders.init({ dropTarget: document.body, onDragState: on => document.body.classList.toggle('dragging', on) });
 
@@ -80,7 +80,6 @@
     click('[data-act="zoom-in"]', () => App.view.zoom(1.25));
     click('[data-act="zoom-out"]', () => App.view.zoom(0.8));
     click('#tgl-overlay', () => App.ui.togglePref('showOverlay'));
-    click('#tgl-labels', () => App.ui.togglePref('showValueLabels'));
     click('#help [data-act="close"]', () => $('#help').close());
     window.addEventListener('keydown', onKey);
 

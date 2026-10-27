@@ -61,7 +61,7 @@ function loadImg(src) {
     // Measurement chain vs the scope's own cursor readout
     const traces = App.traces.extract(img, c);
     const t2 = performance.now();
-    const doc = { calib: c, traces, cursors: { x1: App.calib.xAt(c, s.scopeCursor.t1), x2: App.calib.xAt(c, s.scopeCursor.t2) } };
+    const doc = { calib: c, traces, cursors: { x1: App.calib.xAt(c, s.scopeCursor.t1), x2: App.calib.xAt(c, s.scopeCursor.t2), probe: [s.scopeCursor.ch] } };
     const ro = App.measure.cursorReadout(doc);
     const ch = ro.channels.find(q => q.id === s.scopeCursor.ch);
     // The screenshot only shows the waveform as a band (sample blocks / persistence spread);
