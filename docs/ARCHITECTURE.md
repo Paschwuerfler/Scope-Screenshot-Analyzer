@@ -29,6 +29,48 @@
 Modules talk through `App.events` (tiny pub/sub in `js/util.js`) and the `App.docs` API, never
 through the DOM of another module.
 
+### DPT sweep page (`dpt.html`)
+
+A separate page for comparing double-pulse-test shots. It loads the shared `js/util.js`,
+`js/series.js` (CSV parsing, `strokeColumn`) and `js/loaders.js` (only `filesFromDataTransfer` /
+`readEntry` for folder drops; files carry `relPath` so drops are grouped per folder), plus its own
+modules under `App.dpt`:
+
+```
+ drop / Add folder ──► App.dpt.app.addFiles → group by folder        js/dpt/app.js
+        │                └─ App.dpt.pool.draft(files, folder)          js/dpt/pool.js
+        │                     pair Sxx_C<n> files → shots, parse, guess params
+        ▼
+ App.dpt.ui.openBatchDialog (roles, parameters, overrides) → pool.addDraft
+        │                                                   (IndexedDB "scope-dpt-pool")
+        ▼
+ App.dpt.edges.analyze(switchNode, current, settings) per shot     js/dpt/edges.js
+        │  → edges [{kind, n, t50, base, top, slew1090, …, warn}]
+        ▼  'pool-changed'
+ App.dpt.ui: pool list, overlay, trend plot, table                js/dpt/ui.js
+        └─ canvas helpers (scales, ticks, axes, palettes)           js/dpt/plot.js
+```
+
+- `batch = { id, name, params: [{key, text, value, unit}], roles: {sw, cur}, added }`,
+  `shot = { id, batchId, label, files: [{name, text}], current (override) | null, hidden }`.
+  Parsed channels (`shot.cols`) and results (`shot.res`) are runtime only, rebuilt on load and when
+  the analysis settings change (`pool.setSettings`). Multi-shot changes are saved in one transaction
+  (`pool.updateShots`).
+- `pool.rows(edgeKey)` flattens the pool to one row per shot for one edge (`'rise1'`, `'fall1'`, …)
+  with all parameters in `row.p` (`I`, `I_edge`, `Folder`, batch params). Every view reads these rows.
+- Edge detection: hysteresis at 30 / 70 % of the 2nd–98th percentile range on a 3-point smoothed
+  signal, rejected when the range is below 20× the noise sigma. Each edge is then measured between
+  its own levels (see README "DPT sweep").
+- View settings live in `localStorage` (`dpt-prefs`), the pool in its own IndexedDB, separate from
+  the analyzer session.
+- **Open in scope view** (context menu in `ui.js`, `openInScope` in `app.js`): the DPT page opens
+  `index.html` as the named tab `scope-analyzer` and sends
+  `{ type: 'scope-open', id, docs: [{ name, csv, names, edge: {t1, t2, a, b} }] }` by `postMessage`
+  (works between file:// pages, no shared storage needed). The shot's channels are merged into one
+  CSV. The analyzer (`App.loaders.initHandoff`, only when `window.opener` is set) posts
+  `scope-ready` once its session is restored and `scope-ack` per payload; the DPT page resends
+  until acked. Docs are matched by name, so reopening a shot reuses it.
+
 ## Data model
 
 A **doc** is one loaded screenshot (`js/state.js`):
@@ -43,7 +85,8 @@ A **doc** is one loaded screenshot (`js/state.js`):
 | `chNames` | yes | `{C1: 'Vout', ...}` custom channel names (series: defaults from the CSV headers, `App.series.autoNames`); display them with `App.calib.chLabel(doc, id)` → `C1 (Vout)` |
 | `axisCh` | yes | series: channel whose values label the y axis, set by the last interaction (see `App.series.axisChannel`) |
 | `cursors` | yes | `{x1, x2, sel, periods, probe}`: `probe` = ids of the channels the cursors read (missing = default, see `App.measure.probedChannels`); cursor positions in **image px**, `sel` = keyboard target, `periods` = multi-period mode `{p0, x1}` (reference period and cursor-1 anchor in image px) or null |
-| `bitmap, imgData, traces, thumbUrl, view` | no | runtime caches, rebuilt on load (series: `series, thumbUrl, view = {xa, xb}`) |
+| `parts` | yes | merged views only (`blob = null`): `[{name, blob, shift, map}]`, see "Merged views" |
+| `bitmap, imgData, traces, thumbUrl, view` | no | runtime caches, rebuilt on load (series: `series, thumbUrl, view = {xa, xb}`; merged: `+ partData`) |
 
 ### Series (CSV) docs
 
@@ -60,6 +103,23 @@ screenshots unchanged. The only branches on `doc.kind === 'series'`:
 - `js/overview.js` (`App.overview`) is the bar above the plot that pans/resizes that window;
 - `App.docs.analyze` = auto scale, `retrace` is a no-op, `hydrate` re-parses on restore/import;
 - `App.ui` shows the Display panel instead of the calibration form.
+
+#### Merged views
+
+A merged view is a series doc built from several recordings (`parts`). Each part stores its own file
+blob, a time `shift` (s) and `map` (source column id → channel id in the view, at most C1..C4).
+`App.series.combine(parts, partData)` builds `doc.series`: columns keep their own samples and get
+their own timing `col.t0` (incl. shift) / `col.dt` / `col.part`, and the virtual sample grid spans
+all parts at the finest dt (virtual, nothing is allocated per sample). So **never index `col.v` with
+x directly**: read with `App.series.valueAt` (converts via `colIndex`) and draw with
+`App.series.strokeSeries`. Everything else (cursors, calib, overview, readout) is unchanged.
+- Created by `App.docs.addMerged` from the merge dialog (`App.ui.openMerge`: thumbnail dragged
+  onto another, the ⧉ button or M). A merged doc brings its parts along when merged again.
+- A shift change calls `App.docs.remerge(doc, final)`: rebuilds the grid and remaps cursors,
+  multi-period marks and the window so they keep their times. Shifts are edited in the Display
+  panel (Recordings), by Align at the cursors (undoable, `shifts` in the undo snapshot) or by
+  Ctrl+drag on a curve in `App.view` (emits `doc-updated` with `'shift'` while dragging).
+- Export / import store each part's blob separately (packed per part in the smaller formats).
 
 `calib` (`js/calibrate.js`):
 ```js
@@ -156,3 +216,5 @@ changes add defaults when restoring in `App.docs.restore`.
 | `demo.js` | `index.html?samples=N` replaces the session with the samples (dev only) |
 | `build_demo.ps1` | regenerate `js/demo_image.js` (embedded screenshot behind "Load demo" / `?demo`) |
 | `headless.ps1` | find browser, dump an element of a headless-rendered page |
+| `dpt_test.html` + `dpt_test.ps1` | DPT edge metrics on synthetic double pulses, parameter parsing, `samples/NOR45A24` |
+| `dpt_ui_test.ps1` | DPT page over CDP: two folders through the dialog, hover / pin, edges, sort, right-click → open in the analyzer tab (`Connect-CdpTarget`), reload |

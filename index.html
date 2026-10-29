@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Scope Screenshot Analyzer</title>
 <!-- ?v=N: bump on every publish so browsers never mix a new index.html with cached old scripts (GitHub Pages caches 10 min) -->
-<link rel="stylesheet" href="css/app.css?v=7">
+<link rel="stylesheet" href="css/app.css?v=8">
 </head>
 <body class="empty">
 
@@ -22,6 +22,7 @@
     <button data-act="export" title="Save all images + measurements to a .json file">Export session</button>
     <button data-act="import" title="Load a previously exported .json session">Import session</button>
     <button data-act="clear" class="danger" title="Remove all images">Clear all</button>
+    <a class="btn-link" href="dpt.html" title="Overlay and compare double-pulse-test shots across current, gate resistor, …">DPT sweep</a>
     <button data-act="help" title="Shortcuts (?)">?</button>
   </div>
 </header>
@@ -54,6 +55,7 @@
         <div><button data-act="open-files">Open files</button> <button data-act="open-folder">Open folder</button></div>
         <p>No screenshot at hand? <button data-act="demo">Load demo screenshot</button></p>
         <p class="muted">Known layouts: R&amp;S RTB2004. Other screenshots can be calibrated manually.</p>
+        <p>Comparing double-pulse shots? <a class="btn-link" href="dpt.html" title="Overlay double-pulse-test shots, slew rate / overshoot / ringing against current, Rg, …">Open DPT sweep</a></p>
       </div>
     </div>
     <div class="drop-overlay"><div>Drop to load</div></div>
@@ -91,6 +93,8 @@
     <tr><td>Double-click</td><td>Move nearest cursor to this position</td></tr>
     <tr><td>Drag empty area · wheel</td><td>Pan · zoom (CSV: time axis only; <kbd>Shift</kbd>+wheel pans)</td></tr>
     <tr><td>Channel handle (CSV)</td><td>Drag = offset (snaps to divisions, <kbd>Shift</kbd> = free), wheel = scale (1-2-5)</td></tr>
+    <tr><td><kbd>M</kbd> · drag a thumbnail onto another</td><td>Merge two CSVs into one plot</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+drag a curve (merged)</td><td>Shift that recording in time (or type the shift / <b>Align</b> in the Display panel)</td></tr>
     <tr><td>Overview bar (CSV)</td><td>Drag cursor line = move cursor, drag frame = pan, drag its edges = zoom, click = jump, double-click = show all</td></tr>
     <tr><td>Border image | panel</td><td>Drag = resize, double-click = reset</td></tr>
     <tr><td><kbd>F</kbd> / <kbd>0</kbd>, <kbd>G</kbd>, <kbd>+</kbd> <kbd>−</kbd></td><td>Fit screenshot, fit graticule, zoom in/out</td></tr>
@@ -107,6 +111,27 @@
   Fields marked <span class="badge warn">!</span> could not be confirmed by two sources — check them.
   Everything is saved automatically in this browser; use Export to move a session to another computer.</p>
   <div class="dialog-actions"><button data-act="close">Close</button></div>
+</dialog>
+
+<!-- Merge two CSV docs into one plot (App.ui.openMerge): drag a thumbnail onto another, the ⧉ button or M -->
+<dialog id="merge-dlg">
+  <h3>Merge into one plot</h3>
+  <div class="mg-pick">
+    <label>Into <select id="mg-tgt"></select></label>
+    <label>add <select id="mg-src"></select></label>
+  </div>
+  <p class="muted">Adds a new view <b id="mg-name"></b>. Each recording keeps its own samples; cursors and the visible
+  time window are taken from the first one.</p>
+  <table class="mg-table">
+    <thead><tr><th></th><th>From</th><th>Ch</th><th>Name</th><th>Becomes</th></tr></thead>
+    <tbody id="mg-rows"></tbody>
+  </table>
+  <p id="mg-note" class="mg-note"></p>
+  <p class="muted">Time axis: the recordings start out on their own time stamps (t = 0 is usually the trigger). Shift
+  them against each other afterwards under <b>Recordings</b> in the Display panel, with <b>Align</b> at the cursors,
+  or by <kbd>Ctrl</kbd>+dragging a curve.</p>
+  <label class="inline"><input type="checkbox" id="mg-remove"> Remove the two original views</label>
+  <div class="dialog-actions"><button data-act="cancel">Cancel</button> <button data-act="ok" class="primary">Merge</button></div>
 </dialog>
 
 <!-- Shown by Export session when the file would be larger than 1 MB (App.ui.askExport) -->
@@ -132,20 +157,20 @@
   <div class="dialog-actions"><button data-act="cancel">Cancel</button> <button data-act="ok" class="primary">Export</button></div>
 </dialog>
 
-<script src="js/util.js?v=7"></script>
-<script src="js/ocr_glyphs.js?v=7"></script>
-<script src="js/ocr.js?v=7"></script>
-<script src="js/calibrate.js?v=7"></script>
-<script src="js/layouts/index.js?v=7"></script>
-<script src="js/layouts/rtb2004.js?v=7"></script>
-<script src="js/traces.js?v=7"></script>
-<script src="js/series.js?v=7"></script>
-<script src="js/measure.js?v=7"></script>
-<script src="js/state.js?v=7"></script>
-<script src="js/loaders.js?v=7"></script>
-<script src="js/view.js?v=7"></script>
-<script src="js/overview.js?v=7"></script>
-<script src="js/ui.js?v=7"></script>
-<script src="js/app.js?v=7"></script>
+<script src="js/util.js?v=8"></script>
+<script src="js/ocr_glyphs.js?v=8"></script>
+<script src="js/ocr.js?v=8"></script>
+<script src="js/calibrate.js?v=8"></script>
+<script src="js/layouts/index.js?v=8"></script>
+<script src="js/layouts/rtb2004.js?v=8"></script>
+<script src="js/traces.js?v=8"></script>
+<script src="js/series.js?v=8"></script>
+<script src="js/measure.js?v=8"></script>
+<script src="js/state.js?v=8"></script>
+<script src="js/loaders.js?v=8"></script>
+<script src="js/view.js?v=8"></script>
+<script src="js/overview.js?v=8"></script>
+<script src="js/ui.js?v=8"></script>
+<script src="js/app.js?v=8"></script>
 </body>
 </html>

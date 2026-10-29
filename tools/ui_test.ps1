@@ -1,6 +1,7 @@
 # UI smoke test: drives the real app in headless Edge/Chrome via CDP.
 # Loads the samples (?samples), drags a cursor, nudges with the keyboard, double-clicks,
-# switches images, reloads the page and checks that everything was restored.
+# switches images, reloads the page and checks that everything was restored. Also CSV docs and
+# merged views (two CSVs in one plot: drag a thumbnail onto another, time shift, Align, Ctrl+drag).
 # Usage:  powershell -ExecutionPolicy Bypass -File tools\ui_test.ps1 [-ShotDir <folder>]
 param([string]$ShotDir = '')
 $ErrorActionPreference = 'Stop'
@@ -379,6 +380,106 @@ try {
   Check 'export original files: exact round trip' ($rt.exact.maxDiff -eq 0) ("{0:N0} bytes" -f $rt.exact.size)
   Check 'export lossless: bit-exact samples, smaller' (($rt.lossless.maxDiff -eq 0) -and ($rt.lossless.size -lt $rt.exact.size / 2) -and ($rt.lossless.lossy -eq 0)) ("{0:N0} bytes" -f $rt.lossless.size)
   Check 'export 16 bit: error <= half a level, note on every CSV, smallest' (($rt.compact.maxRel -le 0.5 / 65535 + 1e-6) -and $rt.compact.notes -and ($rt.compact.lossy -eq 3) -and ($rt.compact.size -lt $rt.lossless.size)) ("{0:N0} bytes, max error {1:E2} of range" -f $rt.compact.size, $rt.compact.maxRel)
+} finally { Stop-CdpSession $sess }
+
+# ---------------------------------------------------------------- merged views (two CSVs in one plot)
+$sess = Start-CdpSession 'index.html'
+$projDir = Split-Path $PSScriptRoot -Parent
+try {
+  Wait-Cdp $sess 'window.App && App.docs && document.readyState === "complete"' 30
+  Invoke-CdpJs $sess 'App.docs.clear()' | Out-Null
+  Invoke-CdpJs $sess '(() => { const i = document.createElement("input"); i.type = "file"; i.multiple = true; i.id = "tfile"; i.style.display = "none"; i.onchange = () => App.loaders.loadFiles([...i.files]); document.body.appendChild(i); })()' | Out-Null
+  $root = Invoke-Cdp $sess 'DOM.getDocument' @{}
+  $node = Invoke-Cdp $sess 'DOM.querySelector' @{ nodeId = $root.root.nodeId; selector = '#tfile' }
+  $csvs = @('samples\csv\RealDecoupling.txt', 'samples\csv\WFM05.csv') | ForEach-Object { (Resolve-Path (Join-Path $projDir $_)).Path }
+  Invoke-Cdp $sess 'DOM.setFileInputFiles' @{ nodeId = $node.nodeId; files = $csvs } | Out-Null
+  Wait-Cdp $sess 'App.docs.list().length === 2 && App.docs.list().every(d => d.thumbUrl)' 60
+  Start-Sleep -Milliseconds 300
+
+  # drag the WFM05 thumbnail onto the RealDecoupling one -> merge dialog
+  $pos = Invoke-CdpJs $sess '[...document.querySelectorAll("#strip-list .thumb img")].map(e => { const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })'
+  $a = $pos[1]; $b = $pos[0]
+  Send-CdpMouse $sess 'mouseMoved' $a[0] $a[1]
+  Send-CdpMouse $sess 'mousePressed' $a[0] $a[1]
+  for ($k = 1; $k -le 8; $k++) { Send-CdpMouse $sess 'mouseMoved' $a[0] ($a[1] + ($b[1] - $a[1]) * $k / 8) }
+  $hl = Invoke-CdpJs $sess '!!document.querySelector("#strip-list .thumb.merge-target:not(.bad)") && !!document.querySelector(".thumb-ghost")'
+  Check 'thumbnail drag highlights the merge target' $hl
+  if ($ShotDir) { Save-CdpScreenshot $sess (Join-Path $ShotDir 'ui_merge_drag.png') }
+  Send-CdpMouse $sess 'mouseReleased' $b[0] $b[1]
+  Start-Sleep -Milliseconds 150
+  $dlg = Invoke-CdpJs $sess '(() => { const d = document.getElementById("merge-dlg"); return { open: d.open, rows: d.querySelectorAll("#mg-rows tr").length, used: d.querySelectorAll("[data-muse]:checked").length, slots: [...d.querySelectorAll("[data-mslot]")].map(s => s.value).join(","), tgt: document.getElementById("mg-tgt").selectedOptions[0].text, ghost: !!document.querySelector(".thumb-ghost") }; })()'
+  Check 'drop opens the merge dialog (3 channels, C1..C3)' ($dlg.open -and ($dlg.rows -eq 3) -and ($dlg.used -eq 3) -and ($dlg.slots -eq 'C1,C2,C3') -and ($dlg.tgt -match 'RealDecoupling') -and -not $dlg.ghost) ("rows={0} used={1} slots={2} into={3}" -f $dlg.rows, $dlg.used, $dlg.slots, $dlg.tgt)
+  if ($ShotDir) { Save-CdpScreenshot $sess (Join-Path $ShotDir 'ui_merge_dialog.png') }
+  Invoke-CdpJs $sess 'document.querySelector("#merge-dlg [data-act=ok]").click()' | Out-Null
+  Wait-Cdp $sess 'App.docs.list().length === 3 && App.docs.active().parts' 30
+  $m = Invoke-CdpJs $sess '(() => { const d = App.docs.active(), src = App.docs.list().find(x => x.name.startsWith("WFM05")), s = d.series; const t = src.series.t0 + 734.4 * src.series.dt; const x = (t - s.t0) / s.dt; return { parts: d.parts.length, ids: s.cols.map(c => c.id).join(","), names: JSON.stringify(d.chNames), v: App.series.valueAt(s, "C3", x), v0: App.series.valueAt(src.series, "C1", 734.4), idx: App.docs.list().indexOf(d), recs: document.querySelectorAll("#calib .rec-row").length }; })()'
+  Check 'merged view: 2 recordings, C1..C3, values from the source samples' (($m.parts -eq 2) -and ($m.ids -eq 'C1,C2,C3') -and ($null -ne $m.v0) -and ([math]::Abs($m.v - $m.v0) -lt 1e-6) -and ($m.idx -eq 1) -and ($m.recs -eq 2) -and ($m.names -eq '{"C1":"Vout","C2":"Vvcc","C3":"WFM05 C1"}')) ("ids={0} names={1} v={2} src={3}" -f $m.ids, $m.names, $m.v, $m.v0)
+
+  # time shift typed into the Recordings row: the WFM05 curve moves by exactly that
+  Invoke-CdpJs $sess '(() => { const i = document.querySelector("#calib [data-shift=\"1\"]"); i.value = "5 ns"; i.dispatchEvent(new Event("change", { bubbles: true })); })()' | Out-Null
+  $sh = Invoke-CdpJs $sess '(() => { const d = App.docs.active(), src = App.docs.list().find(x => x.name.startsWith("WFM05")), s = d.series; const t = src.series.t0 + 734.4 * src.series.dt + 5e-9; return { shift: d.parts[1].shift, v: App.series.valueAt(s, "C3", (t - s.t0) / s.dt), v0: App.series.valueAt(src.series, "C1", 734.4) }; })()'
+  Check 'typed time shift moves the recording' (([math]::Abs($sh.shift - 5e-9) -lt 1e-15) -and ($null -ne $sh.v0) -and ([math]::Abs($sh.v - $sh.v0) -lt 1e-6)) ("shift={0} v={1} src={2}" -f $sh.shift, $sh.v, $sh.v0)
+
+  # Align at cursors: the point under cursor 2 moves to cursor 1, then undo
+  $al = Invoke-CdpJs $sess '(() => { const d = App.docs.active(), c = d.calib; d.cursors.x1 = App.calib.xAt(c, 2e-9); d.cursors.x2 = App.calib.xAt(c, 9e-9); App.docs.touch(d); document.getElementById("btn-align-1").click(); return { shift: d.parts[1].shift, t1: App.calib.tAt(d.calib, d.cursors.x1), t2: App.calib.tAt(d.calib, d.cursors.x2), undo: !!document.getElementById("btn-undo") }; })()'
+  Check 'Align at cursors shifts by t1 - t2, cursor 2 follows' (([math]::Abs($al.shift - (5e-9 - 7e-9)) -lt 1e-14) -and ([math]::Abs($al.t1 - 2e-9) -lt 1e-13) -and ([math]::Abs($al.t2 - 2e-9) -lt 1e-13) -and $al.undo) ("shift={0} t1={1} t2={2}" -f $al.shift, $al.t1, $al.t2)
+  if ($ShotDir) { Start-Sleep -Milliseconds 200; Save-CdpScreenshot $sess (Join-Path $ShotDir 'ui_merge_aligned.png') }
+  $un = Invoke-CdpJs $sess '(() => { document.getElementById("btn-undo").click(); return App.docs.active().parts[1].shift; })()'
+  Check 'undo Align restores the shift' ([math]::Abs($un - 5e-9) -lt 1e-15) "shift=$un"
+
+  # Ctrl+drag the WFM05 curve 100 px to the right
+  $g = Invoke-CdpJs $sess @'
+(() => {
+  const d = App.docs.active(), cv = document.getElementById('view'), r = cv.getBoundingClientRect();
+  const s = d.series, col = s.cols.find(c => c.id === 'C3'), xa = (col.t0 - s.t0) / s.dt, xb = xa + (col.v.length - 1) * col.dt / s.dt;
+  App.view.setWindow(d, xa, xb);   // show the whole WFM05 recording
+  const v = { xa: d.view.xa, xb: d.view.xb }, W = cv.clientWidth, kx = (W - 54) / (v.xb - v.xa);
+  const x = (v.xa + v.xb) / 2, val = App.series.valueAt(s, 'C3', x);
+  const sx = r.left + 50 + (x - v.xa) * kx, sy = r.top + 34 + App.calib.yAt(d.calib, 'C3', val) * (cv.clientHeight - 74) / 800;
+  return { sx, sy, spp: s.dt / kx, s0: d.parts[1].shift };
+})()
+'@
+  Start-Sleep -Milliseconds 100
+  Send-CdpMouse $sess 'mouseMoved' $g.sx $g.sy 'none' 1 2
+  Send-CdpMouse $sess 'mousePressed' $g.sx $g.sy 'left' 1 2
+  for ($k = 1; $k -le 5; $k++) { Send-CdpMouse $sess 'mouseMoved' ($g.sx + 20 * $k) $g.sy 'left' 1 2 }
+  Send-CdpMouse $sess 'mouseReleased' ($g.sx + 100) $g.sy 'left' 1 2
+  $cd = Invoke-CdpJs $sess 'App.docs.active().parts[1].shift'
+  Check 'Ctrl+drag on a curve shifts its recording' ([math]::Abs(($cd - $g.s0) - 100 * $g.spp) -lt 2 * $g.spp) ("moved {0:E3} s, expected {1:E3} s" -f ($cd - $g.s0), (100 * $g.spp))
+  if ($ShotDir) { Start-Sleep -Milliseconds 200; Save-CdpScreenshot $sess (Join-Path $ShotDir 'ui_merge_shifted.png') }
+
+  # dropping a screenshot is refused; reload restores the merged view
+  Start-Sleep -Milliseconds 900
+  Invoke-Cdp $sess 'Page.reload' @{} | Out-Null
+  Start-Sleep -Milliseconds 500
+  Wait-Cdp $sess 'window.App && App.docs && App.docs.list().length === 3 && App.docs.active()' 30
+  $rl = Invoke-CdpJs $sess '(() => { const d = App.docs.active(); return { parts: d.parts && d.parts.length, shift: d.parts && d.parts[1].shift, n: d.series.cols.length, recs: document.querySelectorAll("#calib .rec-row").length }; })()'
+  Check 'reload restores the merged view with its shift' (($rl.parts -eq 2) -and ([math]::Abs($rl.shift - $cd) -lt 1e-15) -and ($rl.n -eq 3) -and ($rl.recs -eq 2)) ("parts={0} shift={1}" -f $rl.parts, $rl.shift)
+
+  # export / import round trip (original files and lossless) keeps recordings and shift
+  $rt = Invoke-CdpJs $sess @'
+(async () => {
+  const d = App.docs.active(), out = {};
+  for (const mode of ['exact', 'lossless']) {
+    const e = await App.docs.exportSession(mode), n0 = App.docs.list().length;
+    await App.docs.importSession(new File([e.blob], mode + '.json'));
+    const imp = App.docs.list().slice(n0).find(x => x.parts);
+    let diff = 0;
+    d.series.cols.forEach((c, j) => { const b = imp.series.cols[j]; for (let i = 0; i < c.v.length; i += 7) diff = Math.max(diff, Math.abs(c.v[i] - b.v[i])); if (b.t0 !== c.t0) diff = Infinity; });
+    out[mode] = diff;
+    for (const x of App.docs.list().slice(n0)) await App.docs.remove(x.id);
+  }
+  return out;
+})()
+'@
+  Check 'merged view export round trip (original + lossless)' (($rt.exact -eq 0) -and ($rt.lossless -eq 0)) ("exact={0} lossless={1}" -f $rt.exact, $rt.lossless)
+
+  # keyboard path: M opens the dialog for the active CSV
+  Invoke-CdpJs $sess 'App.docs.setActive(App.docs.list()[0].id)' | Out-Null
+  Send-CdpKey $sess 'm' 'KeyM' 77
+  Start-Sleep -Milliseconds 100
+  Check 'M opens the merge dialog' (Invoke-CdpJs $sess 'document.getElementById("merge-dlg").open')
+  Send-CdpKey $sess 'Escape' 'Escape' 27
 } finally { Stop-CdpSession $sess }
 
 if ($fails) { Write-Host "FAILED: $fails check(s)"; exit 1 } else { Write-Host 'ALL UI CHECKS PASSED' }

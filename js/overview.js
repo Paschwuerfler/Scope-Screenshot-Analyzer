@@ -43,7 +43,7 @@ App.overview = (() => {
   function tracesBitmap(d) {
     const s = d.series, w = canvas.width, h = canvas.height;
     const key = [d.id, w, h, ...s.cols.map(c => d.calib.channels[c.id].on)].join('|');
-    if (cache && cache.key === key) return cache.bmp;
+    if (cache && cache.key === key && cache.series === s) return cache.bmp;   // merged views get a new series on every time shift
     const bmp = document.createElement('canvas'); bmp.width = w; bmp.height = h;
     const g = bmp.getContext('2d');
     g.scale(dpr, dpr);
@@ -53,9 +53,9 @@ App.overview = (() => {
       if (!d.calib.channels[col.id].on) continue;
       const span = col.max - col.min || 1;
       g.strokeStyle = App.calib.channelById(col.id).color; g.globalAlpha = 0.85;
-      App.series.strokeColumn(g, col, 0, s.n - 1, i => toX(d, i), v => PAD + (1 - (v - col.min) / span) * (H - 2 * PAD), W());
+      App.series.strokeSeries(g, s, col, 0, s.n - 1, i => toX(d, i), v => PAD + (1 - (v - col.min) / span) * (H - 2 * PAD), W());
     }
-    cache = { key, bmp };
+    cache = { key, bmp, series: s };
     return bmp;
   }
 

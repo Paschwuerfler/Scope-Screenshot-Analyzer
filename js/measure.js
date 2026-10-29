@@ -7,7 +7,8 @@ App.measure = (() => {
   function traceToSeries(doc, chId) {
     if (doc.kind === 'series') {
       const s = doc.series, col = s.cols.find(c => c.id === chId);
-      return col ? { t: Float64Array.from({ length: s.n }, (_, i) => s.t0 + i * s.dt), v: Float64Array.from(col.v) } : null;
+      const t0 = col && col.dt ? col.t0 : s.t0, dt = col && col.dt ? col.dt : s.dt;   // merged views: own timing
+      return col ? { t: Float64Array.from({ length: col.v.length }, (_, i) => t0 + i * dt), v: Float64Array.from(col.v) } : null;
     }
     const tr = doc.traces && doc.traces[chId];
     if (!tr) return null;

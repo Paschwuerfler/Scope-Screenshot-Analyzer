@@ -8,6 +8,10 @@
 //
 // Runtime (never persisted): doc.series = { t0, dt, n, cols: [{ id, name, unit, v: Float32Array, min, max }] }
 // doc.blob is the CSV file, or after importing a compact session export a packed blob (pack / load).
+//
+// Merged views (combine): the columns come from several recordings, each keeping its own samples;
+// such a column carries its own timing { t0, dt, part } and x (virtual sample index) is converted
+// per column (colIndex). Always read and draw columns through valueAt / strokeSeries.
 App.series = (() => {
   const VH = 800;                      // virtual height (px) of the graticule
   const RE = /\.(csv|txt|tsv|dat)$/i;
@@ -286,12 +290,41 @@ App.series = (() => {
   }
   const rateText = s => `${App.util.formatSI(1 / s.dt, 'Sa/s')}`;
 
+  /** Fractional index into col.v for virtual sample index x (differs only in merged views). */
+  const colIndex = (s, col, x) => (col.dt ? (s.t0 + x * s.dt - col.t0) / col.dt : x);
+
   /** Value of a column at fractional sample index x (linear interpolation), or null. */
   function valueAt(s, chId, x) {
     const col = s && s.cols.find(c => c.id === chId);
-    if (!col || x < 0 || x > s.n - 1) return null;
-    const i = Math.min(s.n - 2, Math.floor(x)), a = x - i;
-    return col.v[i] + (col.v[i + 1] - col.v[i]) * a;
+    if (!col) return null;
+    const n = col.v.length;
+    let i = colIndex(s, col, x);
+    if (Math.abs(i) < 1e-6) i = 0; else if (Math.abs(i - (n - 1)) < 1e-6) i = n - 1;   // float residue at the ends
+    if (!(i >= 0 && i <= n - 1)) return null;
+    const k = Math.min(n - 2, Math.floor(i)), a = i - k;
+    return col.v[k] + (col.v[k + 1] - col.v[k]) * a;
+  }
+
+  /**
+   * Merged view of several recordings. parts = [{ name, shift, map: { srcId: id } }] (shift in s,
+   * map = which source column becomes which channel), data = their parsed series (load()).
+   * Columns keep their samples and get their own timing (t0 incl. shift, dt); the virtual sample
+   * grid spans all parts at the finest dt. -> the same shape as parse() (+ col.t0/dt/part).
+   */
+  function combine(parts, data) {
+    const cols = [];
+    let t0 = Infinity, t1 = -Infinity, dt = Infinity;
+    parts.forEach((p, k) => {
+      const s = data[k], a = s.t0 + (p.shift || 0);
+      for (const c of s.cols) if (p.map[c.id]) cols.push({ ...c, id: p.map[c.id], t0: a, dt: s.dt, part: k });
+      t0 = Math.min(t0, a); t1 = Math.max(t1, a + (s.n - 1) * s.dt); dt = Math.min(dt, s.dt);
+    });
+    cols.sort((a, b) => a.id.localeCompare(b.id));
+    // the grid is virtual (nothing is allocated per sample), cap it only to stay well inside integers
+    dt = Math.max(dt, (t1 - t0) / 1e9);
+    const n = Math.max(2, Math.round((t1 - t0) / dt) + 1);
+    const notes = parts.flatMap((p, k) => data[k].notes.map(x => `${p.name}: ${x}`));
+    return { t0, dt, n, cols, notes };
   }
 
   /**
@@ -322,6 +355,12 @@ App.series = (() => {
     }
     ctx.stroke();
   }
+  /** strokeColumn for a column of series s, with sxOf mapping the virtual sample index (merged views). */
+  function strokeSeries(ctx, s, col, xa, xb, sxOf, syOf, pxWidth) {
+    if (!col.dt) return strokeColumn(ctx, col, xa, xb, sxOf, syOf, pxWidth);
+    const k = col.dt / s.dt, a = (col.t0 - s.t0) / s.dt;
+    strokeColumn(ctx, col, (xa - a) / k, (xb - a) / k, i => sxOf(a + i * k), syOf, pxWidth);
+  }
 
   /** Small preview image (object URL) for the thumbnail strip. */
   function thumbnail(doc) {
@@ -337,10 +376,10 @@ App.series = (() => {
     for (const col of s.cols) {
       if (!c.channels[col.id].on) continue;
       ctx.strokeStyle = App.calib.channelById(col.id).color;
-      strokeColumn(ctx, col, 0, s.n - 1, i => i / (s.n - 1) * (W - 1), v => App.calib.yAt(c, col.id, v) / VH * H, W);
+      strokeSeries(ctx, s, col, 0, s.n - 1, i => i / (s.n - 1) * (W - 1), v => App.calib.yAt(c, col.id, v) / VH * H, W);
     }
     return new Promise(res => cv.toBlob(b => res(URL.createObjectURL(b))));
   }
 
-  return { VH, isSeriesFile, readText, parse, load, pack, packedEnc, isPrecisionNote, autoNames, autoCalib, axisChannel, setScale, gridDiv, rateText, valueAt, strokeColumn, thumbnail };
+  return { VH, isSeriesFile, readText, parse, load, pack, packedEnc, isPrecisionNote, autoNames, autoCalib, axisChannel, setScale, gridDiv, rateText, valueAt, colIndex, combine, strokeColumn, strokeSeries, thumbnail };
 })();

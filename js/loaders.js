@@ -27,9 +27,10 @@ App.loaders = (() => {
   }
 
   // ---- folders via drag & drop (webkitGetAsEntry works in Chrome, Edge and Firefox)
+  // Files get relPath = entry.fullPath ("/folder/file.csv"), so callers can group by folder.
   function readEntry(entry) {
     return new Promise(res => {
-      if (entry.isFile) entry.file(f => res([f]), () => res([]));
+      if (entry.isFile) entry.file(f => { f.relPath = entry.fullPath; res([f]); }, () => res([]));
       else if (entry.isDirectory) {
         const reader = entry.createReader(), all = [];
         const next = () => reader.readEntries(async ents => {
@@ -122,5 +123,42 @@ App.loaders = (() => {
     catch (e) { App.events.emit('toast', `Import failed: ${e.message}`); }
   }
 
-  return { init, pick, loadFiles, loadDemo };
+  // ---- shots sent from the DPT page (dpt.html opens this page as a named tab, see js/dpt/app.js)
+  // msg = { type: 'scope-open', id, docs: [{ name, csv, names: { C1: header name }, edge: { t1, t2, a, b } | null }] }
+  // A shot already in the session (same name) is reused; edge times are absolute (s):
+  // cursors go to t1 / t2 (10 / 90 % crossings), the time window to a..b.
+  const handled = new Set();
+  async function openHandoff(msg) {
+    let first = null;
+    for (const it of msg.docs) {
+      let doc = App.docs.list().find(d => d.kind === 'series' && d.name === it.name);
+      if (!doc) {
+        doc = await App.docs.addSeries(new File([it.csv], it.name + '.csv', { type: 'text/csv' }), it.name);
+        const named = App.series.autoNames({ cols: Object.entries(it.names || {}).map(([id, name]) => ({ id, name })) });
+        for (const id in named) if (doc.series.cols.some(c => c.id === id)) doc.chNames[id] = named[id];
+      }
+      if (it.edge) {
+        const s = doc.series, x = t => (t - s.t0) / s.dt;
+        doc.cursors = Object.assign({}, doc.cursors, { x1: x(it.edge.t1), x2: x(it.edge.t2), sel: 1, periods: null });
+        doc.view = { xa: x(it.edge.a), xb: x(it.edge.b) };
+      }
+      App.docs.touch(doc, 'cursors');
+      first = first || doc;
+    }
+    if (first) App.docs.setActive(first.id);
+  }
+  function initHandoff() {
+    if (!window.opener) return;
+    window.addEventListener('message', async e => {
+      const m = e.data;
+      if (e.source !== window.opener || !m || m.type !== 'scope-open' || !Array.isArray(m.docs)) return;
+      e.source.postMessage({ type: 'scope-ack', id: m.id }, '*');
+      if (handled.has(m.id)) return;
+      handled.add(m.id);
+      try { await openHandoff(m); } catch (err) { console.error(err); App.events.emit('toast', `Could not open the shot: ${err.message}`); }
+    });
+    window.opener.postMessage({ type: 'scope-ready' }, '*');
+  }
+
+  return { init, initHandoff, openHandoff, pick, loadFiles, loadDemo, readEntry, filesFromDataTransfer };
 })();

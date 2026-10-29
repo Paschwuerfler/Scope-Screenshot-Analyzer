@@ -26,6 +26,7 @@
     ',': () => App.view.stepPeriods(-1),
     '.': () => App.view.stepPeriods(1),
     'F2': () => App.ui.startRename(),
+    'm': () => App.ui.openMerge(),
     'Escape': () => App.view.setMode(null),
     '?': () => $('#help').showModal(),
     'F1': () => $('#help').showModal(),
@@ -69,7 +70,7 @@
     const docs = App.docs.list();
     if (!docs.length) { App.ui.toast('Nothing to export.'); return; }
     const opts = { exact: await App.docs.exportSession('exact') };
-    const encs = docs.filter(d => d.kind === 'series').map(d => App.series.packedEnc(d.blob));
+    const encs = docs.filter(d => d.kind === 'series').flatMap(App.docs.blobsOf).map(App.series.packedEnc);
     let mode = 'exact';
     if (opts.exact.blob.size > EXPORT_ASK_BYTES && encs.some(e => e !== 'q16')) {
       App.ui.toast('Preparing smaller export formats…');
@@ -119,6 +120,7 @@
     App.ui.renderAll();
     App.docs.restore().then(() => {
       App.ui.renderAll();
+      App.loaders.initHandoff();   // shots sent from the DPT page
       const q = new URLSearchParams(location.search);
       // index.html?demo loads the built-in demo screenshot (used by the README link).
       if (q.has('demo')) {

@@ -8,13 +8,14 @@
 //
 // Mouse:  drag cursor line or its tag = move cursor | drag elsewhere = pan | wheel = zoom
 //         double-click = move nearest cursor here | pick modes (zero level, grid) via setMode()
+//         merged views: Ctrl+drag a curve = shift its recording in time (App.docs.remerge)
 App.view = (() => {
   const CURSOR_COLORS = { 1: '#22d3ee', 2: '#f472b6' };
   const PERIOD_COLOR = '#e5e7eb';   // multi-period marks
   const HIT_PX = 8;
   let canvas, ctx, dpr = 1;
   let mode = null;            // null | {type:'pick-zero', ch} | {type:'pick-grid'}
-  let drag = null;            // {type:'cursor', n} | {type:'pan', sx, sy, ox, oy} | {type:'grid', ix0, iy0, ix1, iy1}
+  let drag = null;            // {type:'cursor', n} | {type:'pan', sx, sy, ox, oy} | {type:'grid', ix0, iy0, ix1, iy1} | {type:'shift', part, sx, s0, spp}
   let hover = null;           // {ix, iy}
   let hoverHandle = null;     // series: channel id whose 0-level handle is under the pointer (tooltip)
 
@@ -164,7 +165,7 @@ App.view = (() => {
       const cc = c.channels[col.id];
       if (!cc || !cc.on) continue;
       ctx.strokeStyle = App.calib.channelById(col.id).color;
-      App.series.strokeColumn(ctx, col, v.xa, v.xb, i => v.ox + i * v.kx, val => v.oy + App.calib.yAt(c, col.id, val) * v.ky, x1 - x0);
+      App.series.strokeSeries(ctx, s, col, v.xa, v.xb, i => v.ox + i * v.kx, val => v.oy + App.calib.yAt(c, col.id, val) * v.ky, x1 - x0);
     }
     ctx.restore();
 
@@ -198,7 +199,7 @@ App.view = (() => {
       if (lx > x0 + 6 && lx + w > x1 - 4) { lx = x0 + 6; ly += 19 * f; }
       ctx.fillStyle = 'rgba(0,0,0,0.75)'; roundRect(lx - 3, ly, w, 17 * f, 3); ctx.fill(); ctx.fillStyle = col; ctx.fillText(txt, lx + 2 * f, ly + 9 * f); lx += w + 4;
     };
-    item(`${fmt(tdiv, 's', 3)}/div · ${fmt(1 / s.dt, 'Sa/s', 4)}`, '#e5e7eb');
+    item(d.parts ? `${fmt(tdiv, 's', 3)}/div` : `${fmt(tdiv, 's', 3)}/div · ${fmt(1 / s.dt, 'Sa/s', 4)}`, '#e5e7eb');
     for (const col of s.cols) {
       const cc = c.channels[col.id];
       if (cc && cc.on) item(`${App.calib.chLabel(d, col.id)} ${fmt(cc.vdiv, cc.unit, 3)}/div`, App.calib.channelById(col.id).color);
@@ -231,6 +232,7 @@ App.view = (() => {
       [`${App.calib.chLabel(d, h.id)} · ${App.util.formatSI(cc.vdiv, cc.unit, 3)}/div`, font(12, true), App.calib.channelById(h.id).color],
       ['Scroll to change vertical scale', font(12), '#f3f4f6'],
       ['Drag to move (Shift: no snapping)', font(12), '#b8c0cc'],
+      ...(d.parts ? [['Ctrl+drag the curve to shift it in time', font(12), '#b8c0cc']] : []),
     ];
     const w = Math.max(...lines.map(([t, fnt]) => { ctx.font = fnt; return ctx.measureText(t).width; })) + 16 * f, lh = 17 * f, H = lines.length * lh + 10 * f;
     const x = x0 + 8, y = App.util.clamp(h.y - H / 2, y0 + 2, y1 - H - 2);
@@ -446,6 +448,29 @@ App.view = (() => {
     return best;
   }
 
+  /**
+   * Merged views: index of the recording (part) whose curve passes near screen point, or -1.
+   * Checks the value range over ±3 px so steep edges count too.
+   */
+  function hitCurve(d, v, sx, sy) {
+    if (!v.series || !d.parts) return -1;
+    let best = -1, bd = HIT_PX + 4;
+    for (const col of d.series.cols) {
+      const cc = d.calib.channels[col.id];
+      if (!cc || !cc.on) continue;
+      let lo = Infinity, hi = -Infinity;
+      for (let k = -3; k <= 3; k++) {
+        const val = App.series.valueAt(d.series, col.id, (sx + k - v.ox) / v.kx);
+        if (val === null) continue;
+        const y = v.oy + App.calib.yAt(d.calib, col.id, val) * v.ky;
+        lo = Math.min(lo, y); hi = Math.max(hi, y);
+      }
+      const dd = sy < lo ? lo - sy : sy > hi ? sy - hi : 0;
+      if (dd < bd) { bd = dd; best = col.part; }
+    }
+    return best;
+  }
+
   function setCursorX(d, n, ix) {
     ix = App.util.clamp(ix, 0, d.width - 1);
     if (n === 1) d.cursors.x1 = ix; else d.cursors.x2 = ix;
@@ -469,6 +494,8 @@ App.view = (() => {
     if (mode && mode.type === 'pick-grid' && e.button === 0) { drag = { type: 'grid', ix0: ix, iy0: iy, ix1: ix, iy1: iy }; return; }
     const hh = e.button === 0 && hitHandle(d, v, sx, sy);
     if (hh) { d.axisCh = hh; drag = { type: 'offset', ch: hh, sy, z0: d.calib.channels[hh].zeroY }; canvas.style.cursor = 'ns-resize'; render(); return; }
+    const part = e.button === 0 && (e.ctrlKey || e.metaKey) ? hitCurve(d, v, sx, sy) : -1;
+    if (part >= 0) { drag = { type: 'shift', part, sx, s0: d.parts[part].shift || 0, spp: d.series.dt / v.kx }; canvas.style.cursor = 'col-resize'; return; }
     const n = e.button === 0 ? hitCursor(d, v, sx, sy) : 0;
     if (n) { drag = { type: 'cursor', n }; d.cursors.sel = n; canvas.style.cursor = 'ew-resize'; render(); return; }
     drag = { type: 'pan', sx, sy, ox: v.ox, oy: v.oy, xa: v.xa, xb: v.xb, kx: v.kx };
@@ -486,12 +513,18 @@ App.view = (() => {
       d.calib.channels[drag.ch].zeroY = e.shiftKey ? raw : Math.round(raw / ppd) * ppd;
       App.events.emit('doc-updated', d, 'cursors');
     }
+    else if (drag && drag.type === 'shift') {   // seconds per screen px stay constant, the time grid is rebuilt
+      d.parts[drag.part].shift = drag.s0 + (sx - drag.sx) * drag.spp;
+      App.docs.remerge(d);
+      App.events.emit('doc-updated', d, 'shift');
+    }
     else if (drag && drag.type === 'pan' && v.series) { const dx = (sx - drag.sx) / drag.kx; setWindow(d, drag.xa - dx, drag.xb - dx); }
     else if (drag && drag.type === 'pan') { v.ox = drag.ox + sx - drag.sx; v.oy = drag.oy + sy - drag.sy; v.fitted = false; }
     else if (drag && drag.type === 'grid') { drag.ix1 = ix; drag.iy1 = iy; }
     else {
       hoverHandle = mode ? null : hitHandle(d, v, sx, sy);
-      canvas.style.cursor = mode ? 'crosshair' : hoverHandle ? 'ns-resize' : hitCursor(d, v, sx, sy) ? 'ew-resize' : 'grab';
+      canvas.style.cursor = mode ? 'crosshair' : hoverHandle ? 'ns-resize' : hitCursor(d, v, sx, sy) ? 'ew-resize'
+        : (e.ctrlKey || e.metaKey) && hitCurve(d, v, sx, sy) >= 0 ? 'col-resize' : 'grab';
     }
     render();
   }
@@ -501,6 +534,7 @@ App.view = (() => {
     if (drag && d) {
       if (drag.type === 'cursor') App.docs.touch(d, 'cursors');
       if (drag.type === 'offset') App.docs.touch(d, 'calib');
+      if (drag.type === 'shift') App.docs.remerge(d, true);
       if (drag.type === 'grid') {
         const g = d.calib.grid;
         const l = Math.min(drag.ix0, drag.ix1), r = Math.max(drag.ix0, drag.ix1), t = Math.min(drag.iy0, drag.iy1), b = Math.max(drag.iy0, drag.iy1);

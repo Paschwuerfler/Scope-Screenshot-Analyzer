@@ -79,6 +79,14 @@ main { display: grid; grid-template-columns: var(--strip-w) 1fr var(--panel-w); 
 .thumb-btns button { padding: 0 6px; line-height: 18px; background: rgba(0,0,0,.7); }
 .thumb:hover .thumb-btns { display: flex; }
 .thumb-del:hover { color: var(--danger); border-color: var(--danger); }
+/* dragging a thumbnail onto another = merge (App.ui initStripDrag) */
+.thumb.drag-src { opacity: .45; }
+.thumb.merge-target { border-color: var(--ok); }
+.thumb.merge-target.bad { border-color: var(--danger); }
+.thumb.merge-target::after { content: 'Merge'; position: absolute; inset: 4px 4px auto; aspect-ratio: 1280 / 824; display: flex; align-items: center; justify-content: center; background: rgba(15,17,21,.7); color: var(--ok); font-weight: 700; border-radius: 3px; }
+.thumb.merge-target.bad::after { content: 'CSV only'; color: var(--danger); }
+.thumb-ghost { position: fixed; left: 0; top: 0; z-index: 30; width: 110px; pointer-events: none; opacity: .85; border: 2px solid var(--accent); border-radius: 5px; background: #000; }
+.thumb-ghost img { display: block; width: 100%; border-radius: 3px; }
 
 .stage { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #08090b; }
 .stage-tools { display: flex; align-items: center; gap: 5px; padding: 5px 8px; border-bottom: 1px solid var(--line); background: var(--bg-2); }
@@ -165,6 +173,12 @@ button.undo { border-color: var(--accent); color: var(--accent); }
 .ch-table .nowrap { display: flex; width: 100%; }
 .unit-tgl { flex: none; min-width: 22px; padding: 1px 4px; font-size: 11px; font-weight: 600; }
 .series-ch input[data-chname] { min-width: 4.5em; }
+/* merged views: one row per recording (channels, name, time shift, Align) */
+.recordings { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+.rec-head { display: flex; justify-content: space-between; color: var(--fg-2); font-size: 11.5px; margin-bottom: 4px; padding-right: 52px; }
+.rec-row { display: grid; grid-template-columns: auto minmax(0, 1fr) 88px auto; align-items: center; gap: 6px; margin-bottom: 4px; }
+.rec-chips { display: flex; gap: 2px; }
+.rec-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; font-size: 10.5px; font-weight: 700; color: #0b0d10; flex: none; }
 .badge.ok { background: var(--ok); }
 .badge.warn { background: var(--warn); }
@@ -216,6 +230,17 @@ dialog { background: var(--bg-2); color: var(--fg); border: 1px solid var(--line
 dialog::backdrop { background: rgba(0,0,0,.5); }
 dialog td { padding: 3px 10px 3px 0; vertical-align: top; }
 .dialog-actions { text-align: right; }
+select { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; }
+select:disabled { opacity: .4; }
+.mg-pick { display: flex; gap: 14px; flex-wrap: wrap; }
+.mg-pick label { display: flex; align-items: center; gap: 6px; color: var(--fg-2); }
+.mg-pick select { max-width: 220px; }
+.mg-table { width: 100%; border-collapse: collapse; }
+.mg-table th { font-weight: 500; color: var(--fg-2); text-align: left; font-size: 11.5px; }
+.mg-table td { padding: 2px 6px 2px 0; vertical-align: middle; }
+.mg-table tr.off .chip, .mg-table tr.off .mg-from { opacity: .45; }
+.mg-from { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mg-note { color: var(--warn); min-height: 1.4em; margin: 6px 0 0; }
 .exp-opts { display: grid; gap: 8px; margin: 10px 0 14px; }
 .exp-opt { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
 .exp-opt:has(input:checked) { border-color: var(--accent); background: var(--bg-3); }
@@ -223,4 +248,6 @@ dialog td { padding: 3px 10px 3px 0; vertical-align: top; }
 .exp-opt input { width: auto; flex: none; margin-top: 3px; }
 .exp-size { color: var(--accent); font-weight: 600; }
 #exp-err { margin: 4px 0; max-height: 24vh; overflow: auto; }
+a.btn-link { color: var(--fg); text-decoration: none; border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; background: var(--bg-3); }
+a.btn-link:hover { border-color: var(--accent); }
 button.primary { background: var(--accent); color: #0b0d10; border-color: var(--accent); font-weight: 600; }

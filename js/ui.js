@@ -26,6 +26,7 @@ App.ui = (() => {
         <img src="${d.thumbUrl}" alt="" draggable="false">
         <div class="thumb-meta"><span class="thumb-idx">${i + 1}</span><span class="thumb-name" title="Double-click to rename (F2)">${esc(d.name)}</span>${badge(docHealth(d))}</div>
         <div class="thumb-btns">
+          ${d.kind === 'series' ? `<button data-merge="${d.id}" title="Merge with another CSV into one plot (M). Or drag this thumbnail onto another one">⧉</button>` : ''}
           <button data-rename="${d.id}" title="Rename (F2)">✎</button>
           <button class="thumb-del" data-del="${d.id}" title="Remove from session">×</button>
         </div>
@@ -59,6 +60,160 @@ App.ui = (() => {
     inp.focus();
     const dot = d.name.lastIndexOf('.');
     inp.setSelectionRange(0, dot > 0 ? dot : d.name.length);
+  }
+
+  // ---------------------------------------------------------------- strip: drag a thumbnail onto another = merge
+  // Pointer events, not HTML drag & drop (that would trigger the window's file-drop overlay).
+  const DRAG_PX = 6;
+  let stripDrag = null;      // { id, x0, y0, pid, on, ghost, target }
+  let noClickUntil = 0;      // swallow the click that ends a drag
+  const canMerge = (a, b) => a && b && a !== b && a.kind === 'series' && b.kind === 'series';
+  function initStripDrag() {
+    const list = $('#strip-list');
+    list.addEventListener('pointerdown', e => {
+      const li = e.target.closest('.thumb');
+      if (li && e.button === 0 && !e.target.closest('button, input')) stripDrag = { id: li.dataset.id, x0: e.clientX, y0: e.clientY, pid: e.pointerId, on: false, target: null };
+    });
+    list.addEventListener('pointermove', e => {
+      const s = stripDrag; if (!s) return;
+      if (!s.on) {
+        if (Math.hypot(e.clientX - s.x0, e.clientY - s.y0) < DRAG_PX) return;
+        s.on = true; list.setPointerCapture(s.pid);
+        const src = list.querySelector(`.thumb[data-id="${s.id}"]`);
+        if (src) src.classList.add('drag-src');
+        s.ghost = document.createElement('div'); s.ghost.className = 'thumb-ghost';
+        s.ghost.innerHTML = `<img src="${App.docs.get(s.id).thumbUrl}" alt="">`;
+        document.body.appendChild(s.ghost);
+      }
+      s.ghost.style.transform = `translate(${e.clientX + 12}px, ${e.clientY + 12}px)`;
+      const el = document.elementFromPoint(e.clientX, e.clientY), li = el && el.closest('#strip-list .thumb');
+      const t = li && li.dataset.id !== s.id ? li.dataset.id : null;
+      if (t === s.target) return;
+      list.querySelectorAll('.merge-target').forEach(x => x.classList.remove('merge-target', 'bad'));
+      s.target = t;
+      if (t) li.classList.add('merge-target', ...(canMerge(App.docs.get(s.id), App.docs.get(t)) ? [] : ['bad']));
+    });
+    const end = e => {
+      const s = stripDrag; stripDrag = null;
+      if (!s || !s.on) return;
+      noClickUntil = Date.now() + 300;
+      s.ghost.remove();
+      list.querySelectorAll('.drag-src, .merge-target').forEach(x => x.classList.remove('drag-src', 'merge-target', 'bad'));
+      if (e.type !== 'pointerup' || !s.target) return;
+      const a = App.docs.get(s.id), b = App.docs.get(s.target);
+      if (canMerge(a, b)) openMerge(a.id, b.id);
+      else toast('Only CSV waveforms can be merged. Screenshots have no sample data to combine.');
+    };
+    list.addEventListener('pointerup', end);
+    list.addEventListener('pointercancel', end);
+  }
+
+  // ---------------------------------------------------------------- merge dialog
+  // Builds a new merged view (App.docs.addMerged) from two CSV docs (either may itself be merged).
+  // One row per channel of both: use it, its name, and the channel (C1..C4) it becomes.
+  const SLOTS = ['C1', 'C2', 'C3', 'C4'];
+  const shortName = n => String(n).replace(/\.[^.]+$/, '');
+  let merge = null;   // { rows, tgt, src } while the dialog is open
+  function mergeRows(tgt, src) {
+    const rows = [];
+    for (const d of [tgt, src]) for (const col of d.series.cols) {
+      const cc = d.calib.channels[col.id];
+      // unnamed channels of the added recording are named after it ("WFM05 C1"), they usually change slot
+      const name = (d.chNames || {})[col.id] || (d === tgt ? col.id : `${shortName(d.name)} ${col.id}`);
+      rows.push({ d, id: col.id, on: cc.on, use: false, slot: null, name });
+    }
+    const free = () => SLOTS.find(sl => !rows.some(r => r.use && r.slot === sl));
+    // the target keeps its channels, the added ones take free slots; channels that are off stay out
+    for (const r of rows) if (r.d === tgt && r.on) { r.use = true; r.slot = r.id; }
+    for (const r of rows) if (r.d !== tgt && r.on && free()) { r.slot = free(); r.use = true; }
+    for (const r of rows) if (!r.slot) r.slot = r.id;
+    // the same name in both recordings: add the recording's name
+    for (const r of rows) if (rows.some(x => x.d !== r.d && x.name === r.name)) r.name += ` · ${shortName(r.d.name)}`;
+    return rows;
+  }
+  function renderMerge() {
+    const dlg = $('#merge-dlg'), { rows, tgt, src } = merge;
+    const used = rows.filter(r => r.use);
+    dlg.querySelector('#mg-rows').innerHTML = rows.map((r, i) => `<tr class="${r.use ? '' : 'off'}">
+      <td><input type="checkbox" data-muse="${i}" ${r.use ? 'checked' : ''} aria-label="Use ${esc(r.d.name)} ${r.id}"></td>
+      <td class="mg-from" title="${esc(r.d.name)}">${esc(shortName(r.d.name))}</td>
+      <td><span class="chip" style="--c:${App.calib.channelById(r.id).color}">${r.id}</span></td>
+      <td><input data-mname="${i}" value="${esc(r.name)}" ${r.use ? '' : 'disabled'} aria-label="Name"></td>
+      <td><select data-mslot="${i}" ${r.use ? '' : 'disabled'} aria-label="Becomes channel">${SLOTS.map(sl => `<option ${sl === r.slot ? 'selected' : ''}>${sl}</option>`).join('')}</select></td></tr>`).join('');
+    const msg = !used.length ? 'Choose at least one channel.' : rows.length > SLOTS.length && used.length === SLOTS.length ? 'One view shows at most 4 channels (C1–C4). Untick one to use another.' : '';
+    dlg.querySelector('#mg-note').textContent = msg;
+    dlg.querySelector('#mg-name').textContent = `${shortName(tgt.name)} + ${shortName(src.name)}`;
+    dlg.querySelector('[data-act="ok"]').disabled = !used.length || tgt === src;
+  }
+  function onMergeInput(e) {
+    const t = e.target, r = merge.rows[t.dataset.muse || t.dataset.mname || t.dataset.mslot];
+    if (t.id === 'mg-tgt' || t.id === 'mg-src') {
+      const tgt = App.docs.get($('#mg-tgt').value), src = App.docs.get($('#mg-src').value);
+      Object.assign(merge, { tgt, src, rows: tgt === src ? [] : mergeRows(tgt, src) });
+    } else if (t.dataset.muse) {
+      const taken = merge.rows.filter(x => x.use);
+      if (t.checked && taken.length >= SLOTS.length) { t.checked = false; return; }
+      r.use = t.checked;
+      if (r.use && taken.some(x => x.slot === r.slot)) r.slot = SLOTS.find(sl => !taken.some(x => x.slot === sl));
+    } else if (t.dataset.mname) { r.name = t.value; return; }
+    else if (t.dataset.mslot) {   // a slot already in use: the two channels swap
+      const other = merge.rows.find(x => x !== r && x.use && x.slot === t.value);
+      if (other) other.slot = r.slot;
+      r.slot = t.value;
+    }
+    renderMerge();
+  }
+  /** Open the merge dialog: add doc srcId to doc tgtId (defaults: the active CSV and the next one). */
+  function openMerge(srcId, tgtId) {
+    const cands = App.docs.list().filter(d => d.kind === 'series');
+    if (cands.length < 2) { toast('Load at least two CSV waveforms to merge them into one plot.'); return; }
+    const act = App.docs.active();
+    const src = App.docs.get(srcId) || (act && act.kind === 'series' ? act : cands[0]);
+    const tgt = App.docs.get(tgtId) || cands[(cands.indexOf(src) + 1) % cands.length];
+    if (!canMerge(src, tgt)) return;
+    merge = { tgt, src, rows: mergeRows(tgt, src) };
+    const opts = sel => cands.map(d => `<option value="${d.id}" ${d === sel ? 'selected' : ''}>${esc(d.name)}</option>`).join('');
+    $('#mg-tgt').innerHTML = opts(tgt); $('#mg-src').innerHTML = opts(src);
+    $('#mg-remove').checked = false;
+    renderMerge();
+    const dlg = $('#merge-dlg');
+    dlg.showModal();
+    dlg.querySelector('[data-act="ok"]').focus();
+  }
+  async function doMerge() {
+    const { tgt, src, rows } = merge, parts = [], data = [], chNames = {}, channels = {};
+    for (const d of [tgt, src]) {
+      // a merged doc brings its recordings (with their shifts), a plain CSV is one recording
+      const own = d.parts ? d.parts.map((p, k) => [p, d.partData[k]]) : [[{ name: d.name, blob: d.blob, shift: 0, map: Object.fromEntries(d.series.cols.map(c => [c.id, c.id])) }, d.series]];
+      for (const [p, pd] of own) {
+        const map = {};
+        for (const [from, id] of Object.entries(p.map)) { const r = rows.find(x => x.use && x.d === d && x.id === id); if (r) map[from] = r.slot; }
+        if (Object.keys(map).length) { parts.push({ name: p.name, blob: p.blob, shift: p.shift || 0, map }); data.push(pd); }
+      }
+    }
+    for (const r of rows.filter(x => x.use)) {
+      const cc = r.d.calib.channels[r.id];
+      chNames[r.slot] = r.name.trim() === r.slot ? '' : r.name.trim();
+      channels[r.slot] = { on: true, vdiv: cc.vdiv, zeroY: cc.zeroY, unit: cc.unit };
+    }
+    // cursors and the visible time window come from the target
+    const c = tgt.calib, w = App.view.getWindow(tgt);
+    const setup = { chNames, channels, t1: App.calib.tAt(c, tgt.cursors.x1), t2: App.calib.tAt(c, tgt.cursors.x2), tA: App.calib.tAt(c, w.xa), tB: App.calib.tAt(c, w.xb) };
+    const doc = await App.docs.addMerged(`${shortName(tgt.name)} + ${shortName(src.name)}`, parts, data, setup, tgt.id);
+    if ($('#mg-remove').checked) { await App.docs.remove(src.id); await App.docs.remove(tgt.id); }
+    App.docs.setActive(doc.id);
+    toast('Merged. Shift a recording in time under Recordings in the Display panel, or Ctrl+drag its curve.');
+  }
+  function initMergeDialog() {
+    const dlg = $('#merge-dlg');
+    dlg.addEventListener('change', onMergeInput);
+    dlg.addEventListener('input', e => { if (e.target.dataset.mname) onMergeInput(e); });
+    dlg.querySelector('[data-act="cancel"]').addEventListener('click', () => dlg.close());
+    dlg.querySelector('[data-act="ok"]').addEventListener('click', () => {
+      dlg.close();
+      doMerge().catch(e => toast(`Merge failed: ${e.message}`));
+    });
+    dlg.addEventListener('close', () => { merge = null; });
   }
 
   // ---------------------------------------------------------------- readout
@@ -147,6 +302,7 @@ App.ui = (() => {
   function snapshot(d) {
     const snap = JSON.parse(JSON.stringify(Object.fromEntries(SNAP_KEYS.map(k => [k, d[k] === undefined ? null : d[k]]))));
     if (d.kind === 'series') snap.window = { ...App.view.getWindow(d) };
+    if (d.parts) snap.shifts = d.parts.map(p => p.shift || 0);
     return snap;
   }
   /** Run a bulk change on doc d with an undo offered on button `btn` (id) for a few seconds. */
@@ -161,9 +317,10 @@ App.ui = (() => {
     const d = undo && App.docs.get(undo.docId); if (!d) return;
     const { snap, label } = undo;
     clearTimeout(undo.timer); undo = null;
+    if (snap.shifts) { d.parts.forEach((p, k) => { p.shift = snap.shifts[k]; }); App.docs.remerge(d); }
     for (const k of SNAP_KEYS) d[k] = snap[k];
     if (snap.window) App.view.setWindow(d, snap.window.xa, snap.window.xb);
-    App.docs.touch(d, 'calib');
+    if (snap.shifts) App.docs.remerge(d, true); else App.docs.touch(d, 'calib');
     toast(`${label} undone.`);
   }
   /** A bulk-change button, or "Undo" in its place while its undo is pending. */
@@ -264,8 +421,11 @@ App.ui = (() => {
   }
   function seriesDisplayHtml(d) {
     const c = d.calib, w = seriesWindow(d), axis = App.series.axisChannel(d);
+    const info = d.parts
+      ? `<span class="layout-name one-line" title="${esc(d.parts.map(p => p.name).join(' + '))}">Merged · ${d.parts.length} recordings · ${esc(formatSI((d.series.n - 1) * d.series.dt, 's'))}</span>`
+      : `<span class="layout-name one-line" title="CSV: ${d.series.n.toLocaleString('en')} samples, ${esc(formatSI((d.series.n - 1) * d.series.dt, 's'))} long, ${esc(formatSI(d.series.dt, 's'))} per sample">${d.series.n.toLocaleString('en')} Sa · ${esc(formatSI((d.series.n - 1) * d.series.dt, 's'))} · <span class="rate">${esc(App.series.rateText(d.series))}</span></span>`;
     let html = `
-      <div class="layout-row"><span class="layout-name one-line" title="CSV: ${d.series.n.toLocaleString('en')} samples, ${esc(formatSI((d.series.n - 1) * d.series.dt, 's'))} long, ${esc(formatSI(d.series.dt, 's'))} per sample">${d.series.n.toLocaleString('en')} Sa · ${esc(formatSI((d.series.n - 1) * d.series.dt, 's'))} · <span class="rate">${esc(App.series.rateText(d.series))}</span></span>
+      <div class="layout-row">${info}
         ${undoable(d, 'btn-redetect', 'Auto scale', 'Reset all channel scales to fit the data')}</div>
       <div class="field"><label>Time / div</label><input data-w="tdiv" value="${esc(formatSI(w.tdiv, 's'))}"><span></span></div>
       <div class="field"><label>Time at centre</label><input data-w="tCenter" value="${esc(formatSI(w.tCenter, 's'))}"><span></span></div>
@@ -284,9 +444,45 @@ App.ui = (() => {
         <button id="btn-copydisp" class="small" title="Copy channel scales, offsets, on/off, the visible time window and the axis channel, to paste them into another CSV">Copy settings</button>
         ${copiedDisplay ? undoable(d, 'btn-pastedisp', 'Paste settings', `Apply the display settings copied from ${esc(copiedDisplay.from)}`) : '<button class="small" disabled title="Copy the settings of another CSV first">Paste settings</button>'}
       </div>`;
+    if (d.parts) html += recordingsHtml(d);
     if (d.notes && d.notes.length) html += `<ul class="notes series-notes">${d.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>`;
     return html;
   }
+  // Merged views: one row per recording with its channels, its time shift and "Align".
+  function recordingsHtml(d) {
+    const rows = d.parts.map((p, k) => {
+      const chips = d.series.cols.filter(col => col.part === k).map(col => `<span class="chip" style="--c:${App.calib.channelById(col.id).color}">${col.id}</span>`).join('');
+      return `<div class="rec-row"><span class="rec-chips">${chips}</span><span class="rec-name" title="${esc(p.name)}">${esc(shortName(p.name))}</span>
+        <input data-shift="${k}" value="${esc(formatSI(p.shift || 0, 's', 4))}" title="Time shift of this recording. Wheel or ↑/↓: 1/10 of the visible time/div (Shift: 1 div). Or Ctrl+drag its curve in the plot.">
+        ${undoable(d, `btn-align-${k}`, 'Align', 'Shift this recording so that its point under cursor 2 moves to cursor 1. Put cursor 1 on a feature of another curve and cursor 2 on the same feature of this recording')}</div>`;
+    }).join('');
+    return `<div class="recordings"><div class="rec-head"><span>Recordings</span><span>time shift</span></div>${rows}
+      <p class="tip muted">Align: cursor 1 on a feature (an edge, a peak) of one curve, cursor 2 on the same feature of another recording, then Align on that recording's row.</p></div>`;
+  }
+  function syncShifts(d) {
+    if (!d.parts) return;
+    d.parts.forEach((p, k) => {
+      const el = document.querySelector(`#calib [data-shift="${k}"]`);
+      if (el && el !== document.activeElement) el.value = formatSI(p.shift || 0, 's', 4);
+    });
+  }
+  /** Step a recording's time shift by 1/10 of the visible time/div (big: one div). */
+  function stepShift(d, k, dir, big) {
+    const p = d.parts[k];
+    p.shift = (p.shift || 0) + dir * seriesWindow(d).tdiv * (big ? 1 : 0.1);
+    App.docs.remerge(d, true);
+    const inp = document.querySelector(`#calib [data-shift="${k}"]`);
+    if (inp) inp.focus();
+  }
+  /** Shift recording k so that the point under cursor 2 moves to cursor 1; cursor 2 follows it. */
+  function alignAtCursors(d, k) {
+    const c = d.calib;
+    d.parts[k].shift = (d.parts[k].shift || 0) + App.calib.tAt(c, d.cursors.x1) - App.calib.tAt(c, d.cursors.x2);
+    App.docs.remerge(d);
+    d.cursors.x2 = d.cursors.x1;
+    App.docs.remerge(d, true);
+  }
+
   /** Keep the time/div + centre fields in step with zoom/pan (unless the user is typing in them). */
   function syncSeriesWindow() {
     const d = App.docs.active(); if (!d || d.kind !== 'series') return;
@@ -306,6 +502,11 @@ App.ui = (() => {
       const half = w.tdiv * 10 / s.dt / 2, mid = App.calib.xAt(c, w.tCenter);
       App.view.setWindow(d, mid - half, mid + half);
       syncSeriesWindow();
+    } else if (t.dataset.shift) {
+      const p = parseSI(t.value, 's');
+      if (!p) return bad();
+      d.parts[+t.dataset.shift].shift = p.value;
+      App.docs.remerge(d, true);
     } else if (t.dataset.chname) {
       d.chNames = { ...(d.chNames || {}), [t.dataset.chname]: t.value.trim() };
       App.docs.touch(d, 'cursors');
@@ -379,7 +580,7 @@ App.ui = (() => {
   // ---------------------------------------------------------------- status bar
   function renderStatus(h) {
     const d = App.docs.active();
-    $('#status-doc').textContent = !d ? '' : d.kind === 'series' ? `${d.name} — ${d.width.toLocaleString('en')} samples @ ${formatSI(1 / d.series.dt, 'Sa/s')}` : `${d.name} — ${d.width}×${d.height}`;
+    $('#status-doc').textContent = !d ? '' : d.parts ? `${d.name} — ${d.parts.length} recordings merged` : d.kind === 'series' ? `${d.name} — ${d.width.toLocaleString('en')} samples @ ${formatSI(1 / d.series.dt, 'Sa/s')}` : `${d.name} — ${d.width}×${d.height}`;
     if (!d || !h) { $('#status-hover').innerHTML = ''; return; }
     const t = App.calib.tAt(d.calib, h.ix);
     let s = `<span>t = ${formatSI(t, 's')}</span>`;
@@ -472,6 +673,9 @@ App.ui = (() => {
     $('#strip-list').addEventListener('click', e => {
       const del = e.target.closest('[data-del]');
       if (del) { App.docs.remove(del.dataset.del); return; }
+      if (Date.now() < noClickUntil) return;
+      const mg = e.target.closest('[data-merge]');
+      if (mg) { openMerge(mg.dataset.merge); return; }
       const ren = e.target.closest('[data-rename]');
       if (ren) { App.docs.setActive(ren.dataset.rename); startRename(ren.dataset.rename); return; }
       const li = e.target.closest('.thumb');
@@ -488,6 +692,8 @@ App.ui = (() => {
       if (li && e.target.closest('.thumb-meta')) startRename(li.dataset.id);
     });
     initSplitter();
+    initStripDrag();
+    initMergeDialog();
     $('#probe-btns').addEventListener('click', e => { const b = e.target.closest('[data-probe]'); if (b) toggleProbe(b.dataset.probe); });
     $('#calib').addEventListener('change', onCalibChange);
     $('#calib').addEventListener('keydown', e => {
@@ -495,8 +701,13 @@ App.ui = (() => {
       if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && e.target.dataset.vdiv && App.docs.active().kind === 'series') {
         e.preventDefault(); stepSeriesScale(e.target.dataset.vdiv, e.key === 'ArrowUp' ? 1 : -1);
       }
+      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && e.target.dataset.shift) {
+        e.preventDefault(); stepShift(App.docs.active(), +e.target.dataset.shift, e.key === 'ArrowUp' ? 1 : -1, e.shiftKey);
+      }
     });
     $('#calib').addEventListener('wheel', e => {
+      const sh = e.target.closest && e.target.closest('[data-shift]');
+      if (sh && e.deltaY) { e.preventDefault(); stepShift(App.docs.active(), +sh.dataset.shift, e.deltaY < 0 ? 1 : -1, e.shiftKey); return; }
       const t = e.target.closest && e.target.closest('[data-vdiv]');
       if (!t || t.disabled || App.docs.active().kind !== 'series' || !e.deltaY) return;
       e.preventDefault(); stepSeriesScale(t.dataset.vdiv, e.deltaY < 0 ? -1 : 1);
@@ -510,6 +721,10 @@ App.ui = (() => {
         toast(series ? 'Scales reset to fit the data. Undo is offered for 10 s.' : 'Detection re-run. Undo is offered for 10 s.');
       }
       if (id === 'btn-undo') doUndo();
+      if (id.startsWith('btn-align-')) {
+        withUndo(d, id, 'Align', () => alignAtCursors(d, +id.slice(10)));
+        toast('Recording shifted: the point under cursor 2 is now at cursor 1. Undo is offered for 10 s.');
+      }
       if (id === 'btn-copydisp') copyDisplay(d);
       if (id === 'btn-pastedisp' && copiedDisplay) pasteDisplay(d);
       if (e.target.id === 'btn-pickgrid') { App.view.setMode({ type: 'pick-grid' }); toast('Drag a rectangle over the graticule (outer grid border).'); }
@@ -530,6 +745,7 @@ App.ui = (() => {
     App.events.on('doc-updated', (d, what) => {
       if (d !== App.docs.active()) return;
       renderReadout();
+      if (what === 'shift') { syncShifts(d); App.view.render(); return; }   // Ctrl+drag of a curve, many per second
       if (what !== 'cursors' && what !== 'prefs') { renderCalib(); renderStrip(); }
       App.view.render();
     });
@@ -541,5 +757,5 @@ App.ui = (() => {
     App.events.on('busy', b => document.body.classList.toggle('busy', b));
   }
 
-  return { init, prefs, renderAll, toast, togglePref, readoutTSV, startRename, askExport };
+  return { init, prefs, renderAll, toast, togglePref, readoutTSV, startRename, askExport, openMerge };
 })();

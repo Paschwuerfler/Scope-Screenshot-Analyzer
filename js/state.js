@@ -6,10 +6,12 @@
 //     calib, status, notes, raw,        // see js/calibrate.js; status values 'ok'|'warn'|'manual'
 //     chNames: { C1: 'Vout', ... },     // optional custom channel names (App.calib.chLabel)
 //     axisCh,                           // series: channel labelling the y axis (App.series.axisChannel)
-//     cursors: { x1, x2, sel, periods } } // cursor x positions in image px, sel = 1|2 (keyboard target),
+//     cursors: { x1, x2, sel, periods }, // cursor x positions in image px, sel = 1|2 (keyboard target),
 //                                       // periods = multi-period mode {p0, x1} or null (js/measure.js)
+//     parts }                           // merged views only (blob = null): [{ name, blob, shift, map }],
+//                                       // see addMerged / App.series.combine
 // and runtime-only fields (rebuilt on load, never saved):
-//   { bitmap, imgData, traces, thumbUrl }  or for series { series, thumbUrl }
+//   { bitmap, imgData, traces, thumbUrl }  or for series { series, thumbUrl } (+ partData for merged views)
 //
 // Modules never mutate docs silently: call App.docs.update(doc, changes) or
 // App.docs.touch(doc) afterwards so views re-render and the doc is saved.
@@ -53,7 +55,7 @@ App.store = (() => {
 })();
 
 App.docs = (() => {
-  const PERSISTED = ['id', 'name', 'kind', 'blob', 'width', 'height', 'addedAt', 'layoutId', 'layoutName', 'calib', 'status', 'notes', 'raw', 'chNames', 'axisCh', 'cursors'];
+  const PERSISTED = ['id', 'name', 'kind', 'blob', 'width', 'height', 'addedAt', 'layoutId', 'layoutName', 'calib', 'status', 'notes', 'raw', 'chNames', 'axisCh', 'cursors', 'parts'];
   const docs = [];
   let activeId = null;
   let persistenceOk = true;
@@ -80,11 +82,22 @@ App.docs = (() => {
   const list = () => docs;
 
   // ---- image decoding + analysis
+  // Transparent pixels are flattened onto white, so screenshots (e.g. pasted PNGs with
+  // transparent margins) look the same everywhere and analysis never sees "black" alpha=0 pixels.
   async function decode(blob) {
-    const bitmap = await createImageBitmap(blob);
+    let bitmap = await createImageBitmap(blob);
     const c = document.createElement('canvas'); c.width = bitmap.width; c.height = bitmap.height;
-    const ctx = c.getContext('2d', { willReadFrequently: true }); ctx.drawImage(bitmap, 0, 0);
-    return { bitmap, imgData: ctx.getImageData(0, 0, bitmap.width, bitmap.height) };
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(bitmap, 0, 0);
+    let imgData = ctx.getImageData(0, 0, c.width, c.height);
+    let opaque = true;
+    for (let i = 3; i < imgData.data.length; i += 4) if (imgData.data[i] !== 255) { opaque = false; break; }
+    if (!opaque) {
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); ctx.drawImage(bitmap, 0, 0);
+      bitmap.close(); bitmap = await createImageBitmap(c);
+      imgData = ctx.getImageData(0, 0, c.width, c.height);
+    }
+    return { bitmap, imgData };
   }
 
   /** Run layout detection + calibration on a doc (overwrites calib/status/notes). Series: auto scale. */
@@ -94,9 +107,11 @@ App.docs = (() => {
       // Auto scale keeps a unit the user switched (V <-> A)
       if (doc.calib) for (const id in calib.channels) if (doc.calib.channels[id]) calib.channels[id].unit = doc.calib.channels[id].unit;
       const span = App.util.formatSI((s.n - 1) * s.dt, 's');
+      const cols = s.cols.map(c => `${doc.parts ? doc.parts[c.part].name + ': ' : ''}${c.name} [${c.unit}] → ${c.id}`);
       Object.assign(doc, {
-        layoutId: 'csv', layoutName: `CSV · ${s.n.toLocaleString('en')} samples · ${span}`, calib, status, raw: {},
-        notes: [...s.notes, `Columns: ${s.cols.map(c => `${c.name} [${c.unit}] → ${c.id}`).join(', ')}.`],
+        layoutId: 'csv', calib, status, raw: {},
+        layoutName: doc.parts ? `Merged · ${doc.parts.length} recordings · ${span}` : `CSV · ${s.n.toLocaleString('en')} samples · ${span}`,
+        notes: [...s.notes, `Columns: ${cols.join(', ')}.`],
       });
       return;
     }
@@ -117,6 +132,13 @@ App.docs = (() => {
 
   /** Rebuild runtime fields (bitmap/traces or parsed series, thumbnail) of a persisted record. */
   async function hydrate(rec, blob = rec.blob) {
+    if (rec.kind === 'series' && rec.parts) {
+      const doc = { ...rec, blob: null, partData: await Promise.all(rec.parts.map(p => App.series.load(p.blob))) };
+      doc.series = App.series.combine(doc.parts, doc.partData);
+      doc.width = doc.series.n;
+      doc.thumbUrl = await App.series.thumbnail(doc);
+      return doc;
+    }
     if (rec.kind === 'series') {
       const doc = { ...rec, blob, series: await App.series.load(blob) };
       if (!doc.chNames) doc.chNames = App.series.autoNames(doc.series);   // saved before names existed
@@ -161,6 +183,54 @@ App.docs = (() => {
     App.events.emit('docs-changed');
     return doc;
   }
+
+  /**
+   * Add a merged view (several CSV recordings in one plot) after doc afterId. parts = [{ name, blob,
+   * shift, map }], data = their parsed series (same order), setup = { chNames, channels: { C1: {on,
+   * vdiv, zeroY, unit} }, t1, t2, tA, tB } (cursor times and visible window in s). Returns the doc.
+   */
+  async function addMerged(name, parts, data, setup, afterId) {
+    const series = App.series.combine(parts, data);
+    const doc = { id: App.util.uid(), name, kind: 'series', blob: null, width: series.n, height: App.series.VH, addedAt: Date.now(), parts, partData: data, series, chNames: setup.chNames };
+    analyze(doc);
+    for (const id in setup.channels) if (doc.calib.channels[id]) Object.assign(doc.calib.channels[id], setup.channels[id]);
+    const x = t => App.util.clamp((t - series.t0) / series.dt, 0, series.n - 1);
+    doc.cursors = { x1: x(setup.t1), x2: x(setup.t2), sel: 1, periods: null };
+    doc.view = { xa: x(setup.tA), xb: x(setup.tB) };
+    retrace(doc);
+    doc.thumbUrl = await App.series.thumbnail(doc);
+    const i = docs.findIndex(d => d.id === afterId);
+    docs.splice(i < 0 ? docs.length : i + 1, 0, doc);
+    save(doc);
+    App.events.emit('docs-changed');
+    return doc;
+  }
+
+  /**
+   * Merged views: rebuild the time grid after a part's shift changed. Cursors, multi-period marks and
+   * the visible window keep their times. final = done (drag ended / value typed): new thumbnail, save.
+   */
+  function remerge(doc, final = false) {
+    const old = doc.series, s = App.series.combine(doc.parts, doc.partData), c = doc.calib;
+    const re = x => (old.t0 + x * old.dt - s.t0) / s.dt;
+    doc.series = s; doc.width = s.n;
+    c.grid.right = s.n - 1;
+    c.time = { tdiv: (s.n - 1) * s.dt / 10, tCenter: s.t0 + (s.n - 1) * s.dt / 2 };
+    const cur = doc.cursors, clampX = x => App.util.clamp(re(x), 0, s.n - 1);
+    cur.x1 = clampX(cur.x1); cur.x2 = clampX(cur.x2);
+    if (cur.periods) cur.periods = { p0: cur.periods.p0 * old.dt / s.dt, x1: re(cur.periods.x1) };
+    if (doc.view) doc.view = { xa: re(doc.view.xa), xb: re(doc.view.xb) };
+    if (!final) return;
+    touch(doc, 'calib');
+    App.series.thumbnail(doc).then(url => {
+      if (doc.thumbUrl) URL.revokeObjectURL(doc.thumbUrl);
+      doc.thumbUrl = url;
+      App.events.emit('docs-changed');
+    });
+  }
+
+  /** Stored data blobs of a doc (one, or one per part of a merged view). */
+  const blobsOf = d => (d.parts ? d.parts.map(p => p.blob) : [d.blob]);
 
   /** Restore persisted docs on startup. */
   async function restore() {
@@ -236,18 +306,36 @@ App.docs = (() => {
    */
   async function exportSession(mode = 'exact') {
     const out = { app: 'scope-screenshot-analyzer', version: 1, exportedAt: new Date().toISOString(), docs: [] }, lossy = [];
-    for (const d of docs) {
-      const rec = serialize(d);
-      let blob = d.blob;
-      const enc = d.kind === 'series' ? App.series.packedEnc(blob) : null, want = { lossless: 'f32', compact: 'q16' }[mode];
-      // already 16 bit: keep (unpacking to float32 would only be bigger)
-      if (d.kind === 'series' && want && enc !== want && enc !== 'q16') {
-        const p = await App.series.pack(d.series, want, d.calib.channels);
-        blob = p.blob;
-        if (p.note) { rec.notes = [p.note, ...(d.notes || []).filter(n => !App.series.isPrecisionNote(n))]; lossy.push({ name: d.name, note: p.note }); }
+    const want = { lossless: 'f32', compact: 'q16' }[mode];
+    // one stored file -> data URL, packed if asked (already 16 bit: kept, unpacking to float32 would only be bigger)
+    // -> { url, note } (note: 16-bit error text, if newly packed)
+    const encode = async (blob, series, channels, name) => {
+      let note = null;
+      if (series && want && App.series.packedEnc(blob) !== want && App.series.packedEnc(blob) !== 'q16') {
+        const p = await App.series.pack(series, want, channels);
+        blob = p.blob; note = p.note;
+        if (note) lossy.push({ name, note });
       }
       if (App.series.packedEnc(blob)) out.version = 2;   // older app versions cannot read packed series
-      rec.blob = await blobToDataUrl(blob); out.docs.push(rec);
+      return { url: await blobToDataUrl(blob), note };
+    };
+    for (const d of docs) {
+      const rec = serialize(d), series = d.kind === 'series';
+      let notes = [];
+      if (d.parts) {   // merged view: each recording stored on its own
+        rec.parts = [];
+        for (const [k, p] of d.parts.entries()) {
+          const e = await encode(p.blob, d.partData[k], {}, `${d.name} / ${p.name}`);
+          rec.parts.push({ ...p, blob: e.url });
+          if (e.note) notes.push(`${p.name}: ${e.note}`);
+        }
+      } else {
+        const e = await encode(d.blob, series ? d.series : null, d.calib.channels, d.name);
+        rec.blob = e.url;
+        if (e.note) notes = [e.note];
+      }
+      if (notes.length) rec.notes = [...notes, ...(d.notes || []).filter(n => !App.series.isPrecisionNote(n.replace(/^[^:]*: /, '')))];
+      out.docs.push(rec);
     }
     return { blob: new Blob([JSON.stringify(out)], { type: 'application/json' }), lossy };
   }
@@ -255,9 +343,10 @@ App.docs = (() => {
     const data = JSON.parse(await file.text());
     if (data.app !== 'scope-screenshot-analyzer') throw new Error('Not a session file');
     let first = null;
+    const fromUrl = async url => (await fetch(url)).blob();
     for (const rec of data.docs) {
-      const blob = await (await fetch(rec.blob)).blob();
-      const doc = await hydrate({ ...rec, id: App.util.uid() }, blob);
+      const parts = rec.parts && await Promise.all(rec.parts.map(async p => ({ ...p, blob: await fromUrl(p.blob) })));
+      const doc = parts ? await hydrate({ ...rec, parts, id: App.util.uid() }) : await hydrate({ ...rec, id: App.util.uid() }, await fromUrl(rec.blob));
       docs.push(doc); save(doc);
       first = first || doc;
     }
@@ -265,5 +354,5 @@ App.docs = (() => {
     if (first) setActive(first.id);
   }
 
-  return { list, get, active, setActive, step, addImage, addSeries, restore, remove, rename, clear, touch, analyze, exportSession, importSession, isPersistent: () => persistenceOk };
+  return { list, get, active, setActive, step, addImage, addSeries, addMerged, remerge, blobsOf, restore, remove, rename, clear, touch, analyze, exportSession, importSession, isPersistent: () => persistenceOk };
 })();

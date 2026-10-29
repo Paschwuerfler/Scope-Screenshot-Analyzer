@@ -15,9 +15,11 @@ new measurement, time-series import, UI controls). User guide: [README.md](READM
   in `index.html` (with the same `?v=N` cache-busting suffix as the others; bump N in all tags
   whenever publishing to GitHub Pages) (order matters: util → ocr → calibrate → layouts → traces → series → measure →
   state → loaders → view → overview → ui → app) and, if needed by tests, to `tools/test.html` / `tools/harvest.html`.
+  `dpt.html` (DPT sweep page) has its own list: util → series → loaders → dpt/edges → dpt/pool → dpt/plot →
+  dpt/ui → dpt/app; bump its `?v=N` together with `index.html`.
 - Everything hangs off the global `App` namespace (`App.util`, `App.ocr`, `App.calib`,
   `App.layouts`, `App.traces`, `App.series`, `App.measure`, `App.store`, `App.docs`, `App.loaders`,
-  `App.view`, `App.ui`, `App.events`). No globals besides `App` (and test-only `SAMPLES`).
+  `App.view`, `App.ui`, `App.events`; DPT page: `App.dpt.edges/pool/plot/ui/app`). No globals besides `App` (and test-only `SAMPLES`).
 - No third-party libraries unless vendored into `lib/` with a pinned version. No CDNs (offline use).
 - Physical units internally are SI base units (s, V, Hz). Format only at display time with
   `App.util.formatSI / formatRange / formatRate`. Parse user input with `App.util.parseSI`.
@@ -39,7 +41,11 @@ new measurement, time-series import, UI controls). User guide: [README.md](READM
 | OCR engine / glyphs | `js/ocr.js`; glyphs are generated, see below |
 | Loading inputs (drop, paste, pickers) | `js/loaders.js` |
 | CSV parsing, auto scale, plot drawing helpers | `js/series.js`; plot + time-only zoom in `js/view.js`, overview bar `js/overview.js` |
+| Merging CSVs into one plot (strip drag, dialog, Recordings / time shift) | `js/ui.js` (`initStripDrag`, `openMerge`, `recordingsHtml`); data: `App.series.combine`, `App.docs.addMerged/remerge`; Ctrl+drag shift in `js/view.js`. See ARCHITECTURE "Merged views" |
 | Persistence, export/import | `js/state.js` |
+| DPT sweep page: layout / controls | `dpt.html`, `css/dpt.css`, `js/dpt/ui.js` (views, dialog), `js/dpt/app.js` (actions, `KEYS`) |
+| DPT edge metrics (slew, overshoot, ringing, levels) | `js/dpt/edges.js` (pure maths, tested by `tools/dpt_test.html`) |
+| DPT pool: folder pairing, parameters, persistence | `js/dpt/pool.js` |
 
 ## Verify every change
 Run from the project root in PowerShell (needs Edge or Chrome installed, nothing else):
@@ -52,6 +58,8 @@ Run from the project root in PowerShell (needs Edge or Chrome installed, nothing
   `Send-CdpKey`, `Save-CdpScreenshot`) for ad-hoc UI checks. `index.html?samples=N` replaces
   the session with the samples and selects image N; `index.html?demo` loads the built-in demo
   screenshot (`js/demo_image.js`, regenerate with `toolsuild_demo.ps1`).
+- DPT page: `powershell -ExecutionPolicy Bypass -File tools\dpt_test.ps1` (edge metrics, must print
+  `ALL PASSED`) and `tools\dpt_ui_test.ps1 -ShotDir <folder>` (UI over CDP with `samples/NOR45A24`).
 - If OCR glyphs or samples change: `powershell -ExecutionPolicy Bypass -File tools\build_glyphs.ps1`
   regenerates `js/ocr_glyphs.js` (never edit that file by hand).
 

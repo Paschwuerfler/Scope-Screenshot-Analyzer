@@ -1,0 +1,127 @@
+<!doctype html>
+<!--
+  DPT edge-metric regression: synthetic double-pulse waveforms with known slew, overshoot and
+  ringing (noise + quantisation added), parameter parsing, and the real shots in
+  samples/NOR45A24. Run via tools/dpt_test.ps1 (needs --allow-file-access-from-files for the samples).
+-->
+<html><head><meta charset="utf-8"><title>DPT tests</title>
+<style>body{font:13px monospace;background:#111;color:#ddd}</style></head>
+<body>
+<pre id="out">PENDING</pre>
+<script src="../js/util.js"></script>
+<script src="../js/series.js"></script>
+<script src="../js/dpt/edges.js"></script>
+<script src="../js/dpt/pool.js"></script>
+<script>
+(async () => {
+  const lines = []; let fails = 0, checks = 0;
+  const F = App.util.formatSI, R = App.util.formatRate;
+  const check = (name, ok, detail = '') => { checks++; if (!ok) fails++; lines.push(`  ${ok ? 'PASS' : 'FAIL'}  ${name}  ${detail}`); };
+  const near = (a, b, rel) => a !== null && isFinite(a) && Math.abs(a - b) <= Math.abs(b) * rel;
+
+  // seeded noise so failures are reproducible
+  let seed = 1;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const gauss = () => Math.sqrt(-2 * Math.log(rnd() || 1e-9)) * Math.cos(2 * Math.PI * rnd());
+
+  /**
+   * Double pulse: base -> top at tOn (linear ramp over tr), damped ringing (amp, f, tau) after the
+   * ramp, back to base at tOff (ramp tf, ringing amp2). Returns clean and noisy/quantised samples.
+   */
+  function synth(o) {
+    const n = 2500, dt = 0.4e-9, t0 = -100e-9, clean = new Float32Array(n), v = new Float32Array(n);
+    const sw = o.top - o.base;
+    for (let i = 0; i < n; i++) {
+      const t = t0 + i * dt;
+      let y = o.base;
+      if (t >= o.tOn) {
+        const u = t - o.tOn;
+        y = u < o.tr ? o.base + sw * u / o.tr : o.top + o.amp * Math.exp(-(u - o.tr) / o.tau) * Math.sin(2 * Math.PI * o.f * (u - o.tr));
+      }
+      if (o.tOff !== undefined && t >= o.tOff) {
+        const u = t - o.tOff;
+        y = u < o.tf ? o.top - sw * u / o.tf : o.base - o.amp2 * Math.exp(-(u - o.tf) / o.tau) * Math.sin(2 * Math.PI * o.f * (u - o.tf));
+      }
+      clean[i] = y;
+      v[i] = Math.round((y + o.noise * gauss()) / o.lsb) * o.lsb;
+    }
+    return { t0, dt, v, clean };
+  }
+  /** First local extreme after the edge and the following opposite one, from the clean signal. */
+  function firstRing(clean, i0, dir) {
+    let k = i0;
+    while (k < clean.length - 1 && dir * clean[k + 1] >= dir * clean[k]) k++;
+    const pk = clean[k];
+    while (k < clean.length - 1 && dir * clean[k + 1] <= dir * clean[k]) k++;
+    return { pk, pp: dir * (pk - clean[k]) };
+  }
+
+  lines.push('== synthetic double pulse');
+  const o = { base: -2, top: 48, tOn: 0, tr: 8e-9, amp: 6, f: 120e6, tau: 15e-9, tOff: 500e-9, tf: 5e-9, amp2: 4, noise: 0.08, lsb: 0.2 };
+  const s = synth(o);
+  const cur = { t0: s.t0, dt: s.dt, v: Float32Array.from({ length: s.v.length }, () => 12 + 0.3 * gauss()) };
+  const r = App.dpt.edges.analyze(s, cur);
+  check('two edges', r.edges.length === 2 && r.edges[0].kind === 'rise' && r.edges[1].kind === 'fall', r.edges.map(e => e.kind + e.n).join(','));
+  const sw = o.top - o.base, iOn = Math.round((o.tOn + o.tr - s.t0) / s.dt), iOff = Math.round((o.tOff + o.tf - s.t0) / s.dt);
+  const [er, ef] = r.edges;
+  check('rise levels', Math.abs(er.base - o.base) < 0.2 && Math.abs(er.top - o.top) < 0.2, `${F(er.base, 'V')} / ${F(er.top, 'V')}`);
+  check('rise slew 10-90', near(er.slew1090, sw / o.tr, 0.03), `${R(er.slew1090)} expected ${R(sw / o.tr)}`);
+  check('rise slew 20-80', near(er.slew2080, sw / o.tr, 0.03), R(er.slew2080));
+  check('rise time', near(er.trise, 0.8 * o.tr, 0.04), F(er.trise, 's'));
+  check('rise peak dv/dt', near(er.dvdtMax, sw / o.tr, 0.04), R(er.dvdtMax));
+  check('fall peak dv/dt', near(ef.dvdtMax, sw / o.tf, 0.05), R(ef.dvdtMax));
+  const rr = firstRing(s.clean, iOn, 1);
+  check('rise overshoot', Math.abs(er.overshoot - (rr.pk - o.top)) < 0.35, `${F(er.overshoot, 'V')} expected ${F(rr.pk - o.top, 'V')}`);
+  check('rise ringing pk-pk', near(er.ringPP, rr.pp, 0.06), `${F(er.ringPP, 'V')} expected ${F(rr.pp, 'V')}`);
+  check('rise t50', Math.abs(er.t50 - (o.tOn + o.tr / 2)) < 0.4e-9, `${F(er.t50, 's')} expected ${F(o.tOn + o.tr / 2, 's')}`);
+  check('edge current', near(er.iEdge, 12, 0.02) && near(r.iMean, 12, 0.01), `${F(er.iEdge, 'A')} mean ${F(r.iMean, 'A')}`);
+  check('fall slew 10-90', near(ef.slew1090, sw / o.tf, 0.04), `${R(ef.slew1090)} expected ${R(sw / o.tf)}`);
+  const fr = firstRing(s.clean, iOff, -1);
+  check('fall undershoot', Math.abs(ef.overshoot - (o.base - fr.pk)) < 0.35, `${F(ef.overshoot, 'V')} expected ${F(o.base - fr.pk, 'V')}`);
+  check('fall ringing pk-pk', near(ef.ringPP, fr.pp, 0.08), `${F(ef.ringPP, 'V')} expected ${F(fr.pp, 'V')}`);
+  check('no warnings', !r.warn.length && !er.warn.length && !ef.warn.length, [...r.warn, ...er.warn, ...ef.warn].join('; '));
+
+  lines.push('\n== edge cases');
+  const flat = synth(Object.assign({}, o, { top: o.base + 0.3, amp: 0, amp2: 0 }));
+  const rf = App.dpt.edges.analyze(flat, null);
+  check('no edge in a flat record', !rf.edges.length && rf.warn.length === 1 && /no switching edge/.test(rf.warn[0]), rf.warn.join('; '));
+  const noRing = synth(Object.assign({}, o, { amp: 0, amp2: 0, tOff: undefined }));
+  const rn = App.dpt.edges.analyze(noRing, null);
+  check('no ringing -> ringPP 0', rn.edges.length === 1 && rn.edges[0].ringPP === 0 && rn.edges[0].overshoot < 0.3, `${F(rn.edges[0].ringPP, 'V')} os ${F(rn.edges[0].overshoot, 'V')}`);
+  const clip = synth(Object.assign({}, o, { tOff: undefined }));
+  for (let i = 0; i < clip.v.length; i++) clip.v[i] = Math.min(clip.v[i], 46);
+  check('clipping flagged', App.dpt.edges.analyze(clip, null).warn.some(w => /clipped/.test(w)));
+
+  lines.push('\n== parameters');
+  const g = App.dpt.pool.guessParams('NOR45A24_Rg10_24V');
+  check('folder name Rg10_24V', g.length === 2 && g[0].key === 'Rg' && g[0].value === 10 && g[1].key === 'V' && g[1].value === 24, JSON.stringify(g));
+  const g2 = App.dpt.pool.guessParams('S01_10A_Rg_1M_24V');
+  check('S01_10A_Rg_1M_24V', g2.some(p => p.key === 'Rg' && p.value === 1e6) && g2.some(p => p.key === 'A' && p.value === 10) && !g2.some(p => p.key === 'S'), JSON.stringify(g2));
+  check('Rg4p7 -> 4.7', App.dpt.pool.guessParams('Rg4p7')[0].value === 4.7);
+  const pm = App.dpt.pool.param('Rs', '4.7mOhm');
+  check('param 4.7mOhm', Math.abs(pm.value - 4.7e-3) < 1e-12 && pm.unit === 'Ω', JSON.stringify(pm));
+  check('text param', App.dpt.pool.param('Device', 'GaN-X').value === null);
+
+  lines.push('\n== samples/NOR45A24');
+  const get = n => new Promise((res, rej) => { const x = new XMLHttpRequest(); x.open('GET', '../samples/NOR45A24/' + n); x.onload = () => res(x.responseText); x.onerror = () => rej(new Error('cannot load ' + n)); x.send(); });
+  try {
+    const res = [];
+    for (let k = 1; k <= 21; k++) {
+      const id = 'S' + String(k).padStart(2, '0');
+      const a = App.series.parse(await get(id + '_C1.CSV')), c = App.series.parse(await get(id + '_C3.CSV'));
+      res.push(App.dpt.edges.analyze({ t0: a.t0, dt: a.dt, v: a.cols[0].v }, { t0: c.t0, dt: c.dt, v: c.cols[0].v }));
+    }
+    check('S01 has no edge', !res[0].edges.length);
+    check('S02..S21 rise1 + fall1', res.slice(1).every(r => r.edges.length === 2 && r.edges[0].kind === 'rise' && r.edges[1].kind === 'fall'));
+    check('S21 current', near(res[20].iMean, 43.8, 0.01), F(res[20].iMean, 'A'));
+    const sl = res.slice(1).map(r => r.edges[0].slew1090);
+    check('rise slew 1.4..2.2 V/ns', sl.every(v => v > 1.4e9 && v < 2.2e9), `${R(Math.min(...sl))} … ${R(Math.max(...sl))}`);
+    check('S21 ringing visible', res[20].edges[0].ringPP > 1, F(res[20].edges[0].ringPP, 'V'));
+    check('S05 no ringing', res[4].edges[0].ringPP === 0, F(res[4].edges[0].ringPP, 'V'));
+  } catch (e) { check('load samples', false, e.message); }
+
+  const out = document.getElementById('out');
+  out.textContent = `${fails ? `FAILED ${fails} of ${checks}` : `ALL PASSED (${checks} checks)`}\n${lines.join('\n')}`;
+})();
+</script>
+</body></html>

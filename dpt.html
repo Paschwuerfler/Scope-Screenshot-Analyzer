@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DPT Sweep</title>
+<!-- ?v=N: same cache-busting number as index.html, bump both on every publish -->
+<link rel="stylesheet" href="css/app.css?v=8">
+<link rel="stylesheet" href="css/dpt.css?v=8">
+</head>
+<body class="empty">
+
+<header class="toolbar">
+  <div class="brand">DPT Sweep</div>
+  <div class="group">
+    <button data-act="add-folder" title="Add a folder of shots (Sxx_C1.CSV, Sxx_C3.CSV, …) as one batch (A)">Add folder</button>
+    <button data-act="add-files" title="Add selected CSV files as one batch">Add files</button>
+    <span class="hint">or drop folders · one batch per folder</span>
+  </div>
+  <div class="spacer"></div>
+  <div class="group">
+    <button data-act="export" title="Save the whole pool (raw data, parameters) to a .json file">Export pool</button>
+    <button data-act="import" title="Add the batches of an exported pool file">Import pool</button>
+    <button data-act="clear" class="danger" title="Remove all batches">Clear pool</button>
+    <a class="btn-link" href="index.html" title="Open the screenshot / CSV analyzer">Analyzer</a>
+    <button data-act="help" title="Shortcuts and metric definitions (?)">?</button>
+  </div>
+</header>
+
+<main class="dpt">
+  <aside class="pool">
+    <div class="strip-head"><span>Pool</span><span id="pool-count" class="muted"></span></div>
+    <div id="pool-list"></div>
+    <section class="card settings">
+      <div class="card-head"><h3>Analysis</h3></div>
+      <label title="Peak dv/dt: least-squares slope over this time span (longer = less noise, but a lower peak on fast edges)">dv/dt window <input id="set-dvdt" class="num"></label>
+      <label title="Overshoot and first oscillation are searched within this time after the 50 % crossing">Ringing window <input id="set-ring" class="num"></label>
+      <label title="Current at the edge = mean of the current channel over this time before the 50 % crossing">Current window <input id="set-cur" class="num"></label>
+    </section>
+  </aside>
+
+  <section class="plots">
+    <div class="plot-box">
+      <div class="stage-tools">
+        <label>Edge <select id="sel-edge" title="Which edge of each shot is overlaid, plotted and listed (E)"></select></label>
+        <label>Colour by <select id="sel-color" title="Numeric parameter: blue ramp, dim = low · text parameter: one colour per value"></select></label>
+        <span class="sep"></span>
+        <button data-act="fit" title="Show the whole edge again (F, or double-click the plot)">Fit</button>
+        <button data-act="copy-overlay" title="Copy the overlay plot as a PNG image">Copy image</button>
+        <span class="spacer"></span>
+        <span class="muted small">aligned at the 50 % crossing · wheel = zoom time · drag = pan</span>
+      </div>
+      <div class="canvas-wrap"><canvas id="cv-overlay"></canvas><div id="tip-overlay" class="plot-tip"></div></div>
+    </div>
+    <div class="plot-box">
+      <div class="stage-tools">
+        <label>Y <select id="sel-metric"></select></label>
+        <label>X <select id="sel-x"></select></label>
+        <label>Group by <select id="sel-group" title="One line, colour and marker per value of this parameter"></select></label>
+        <button id="tgl-logx" class="toggle" title="Logarithmic X axis (L), useful when the current steps grow geometrically">Log X</button>
+        <span class="sep"></span>
+        <button data-act="copy-trend" title="Copy the trend plot as a PNG image">Copy image</button>
+      </div>
+      <div class="canvas-wrap"><canvas id="cv-trend"></canvas><div id="tip-trend" class="plot-tip"></div></div>
+    </div>
+    <div class="table-box">
+      <div class="stage-tools">
+        <b id="tbl-title">Edges</b>
+        <span class="spacer"></span>
+        <button data-act="copy-table" title="Copy the table as tab-separated text, e.g. for Excel (C)">Copy</button>
+        <button data-act="export-csv" title="Save the table as CSV (values in SI units)">Export CSV</button>
+      </div>
+      <div class="table-wrap"><table id="tbl"></table></div>
+    </div>
+    <div class="empty-state">
+      <div class="drop-card">
+        <h2>Collect double-pulse shots</h2>
+        <p>Drop a folder with one shot per current step (e.g. <code>S01_C1.CSV</code> + <code>S01_C3.CSV</code>),<br>
+        say what is constant in it (gate resistor, voltage, …), then add the next folder.</p>
+        <div><button data-act="add-folder">Add folder</button> <button data-act="add-files">Add files</button></div>
+        <p class="muted">C1 = switch node, C3 = current probe by default · change per folder.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="status">
+  <span id="status"></span>
+  <span id="status-hover"></span>
+</footer>
+<div class="drop-overlay"><div>Drop folders to add them to the pool</div></div>
+<div id="toast"></div>
+<div id="ctx-menu" class="ctx-menu" role="menu"></div>
+
+<dialog id="batch-dlg">
+  <h3 id="bd-title">Add folder</h3>
+  <div class="bd-grid">
+    <label>Name <input id="bd-name"></label>
+    <label>Switch node <select id="bd-sw"></select></label>
+    <label>Current <select id="bd-cur"></select></label>
+  </div>
+  <h4>Parameters of this folder <span class="muted">(constant for all its shots, e.g. Rg = 10 Ω, Vdc = 24 V)</span></h4>
+  <table id="bd-params" class="bd-params"></table>
+  <button class="small" data-bd="add-param">+ Parameter</button>
+  <h4>Shots <span id="bd-count" class="muted"></span></h4>
+  <div class="bd-shots-wrap"><table id="bd-shots" class="grid-table"></table></div>
+  <div class="dialog-actions"><button data-bd="cancel">Cancel</button> <button data-bd="ok" class="primary">Add to pool</button></div>
+</dialog>
+
+<dialog id="help" class="wide">
+  <h3>DPT Sweep</h3>
+  <p>Every dropped folder becomes a <b>batch</b>: its shots plus the parameters you enter for it.
+  The shot current is the mean of the current channel (editable per shot). All batches form one pool that is
+  saved in this browser; Export pool moves it to another computer.</p>
+  <table>
+    <tr><td><kbd>A</kbd></td><td>Add folder</td></tr>
+    <tr><td><kbd>E</kbd> / <kbd>Shift</kbd>+<kbd>E</kbd></td><td>Next / previous edge (rise 1, fall 1, …)</td></tr>
+    <tr><td><kbd>F</kbd></td><td>Fit overlay to the whole edge</td></tr>
+    <tr><td><kbd>←</kbd> <kbd>→</kbd> · <kbd>+</kbd> <kbd>−</kbd></td><td>Pan · zoom the overlay time axis</td></tr>
+    <tr><td><kbd>C</kbd></td><td>Copy table (tab-separated)</td></tr>
+    <tr><td><kbd>O</kbd></td><td>Open the hovered shot (else the pinned shots) in the scope view</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>Unpin all shots</td></tr>
+    <tr><td>Hover / click</td><td>Hover a curve, point or row to highlight that shot everywhere; click to pin it</td></tr>
+    <tr><td>Right-click</td><td>On a shot (list, plot, table row): open it in the scope view, zoomed to the selected edge with cursors at 10 / 90 %</td></tr>
+  </table>
+  <h4>Metrics (per edge, between the levels before and after it)</h4>
+  <table>
+    <tr><td>Levels</td><td>Median before the edge and over the second half of the time until the next edge; swing = difference</td></tr>
+    <tr><td>Slew 10–90 / 20–80 %</td><td>0.8 (0.6) × swing / time between the level crossings; 10–90 % time = rise/fall time</td></tr>
+    <tr><td>Peak dv/dt</td><td>Largest least-squares slope over the dv/dt window between the 10 % and 90 % crossings</td></tr>
+    <tr><td>Overshoot</td><td>Furthest excursion beyond the final level within the ringing window (3-point smoothed)</td></tr>
+    <tr><td>Ringing pk-pk</td><td>First oscillation after the 50 % crossing: first peak minus the following valley (smoothed)</td></tr>
+  </table>
+  <p class="muted"><span class="badge warn">!</span> marks shots or edges whose values may be unreliable (no edge, clipped, level not settled); hover it for the reason.</p>
+  <div class="dialog-actions"><button data-act="close">Close</button></div>
+</dialog>
+
+<script src="js/util.js?v=8"></script>
+<script src="js/series.js?v=8"></script>
+<script src="js/loaders.js?v=8"></script>
+<script src="js/dpt/edges.js?v=8"></script>
+<script src="js/dpt/pool.js?v=8"></script>
+<script src="js/dpt/plot.js?v=8"></script>
+<script src="js/dpt/ui.js?v=8"></script>
+<script src="js/dpt/app.js?v=8"></script>
+</body>
+</html>

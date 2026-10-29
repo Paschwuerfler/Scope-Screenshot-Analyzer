@@ -31,10 +31,26 @@ function Start-CdpSession([string]$page, [int]$Width = 1600, [int]$Height = 950,
   $ws = New-Object System.Net.WebSockets.ClientWebSocket
   $ws.Options.KeepAliveInterval = [TimeSpan]::FromSeconds(30)
   $ws.ConnectAsync([Uri]$t.webSocketDebuggerUrl, [Threading.CancellationToken]::None).Wait()
-  $s = [pscustomobject]@{ Ws = $ws; Proc = $proc; Id = 0; Profile = $profile }
+  $s = [pscustomobject]@{ Ws = $ws; Proc = $proc; Id = 0; Profile = $profile; Port = $Port }
   Invoke-Cdp $s 'Emulation.setDeviceMetricsOverride' @{ width = $Width; height = $Height; deviceScaleFactor = 1; mobile = $false } | Out-Null
   Invoke-Cdp $s 'Page.navigate' @{ url = $url } | Out-Null
   return $s
+}
+
+# Attach to another tab of the same browser (e.g. one the page opened with window.open) whose URL
+# matches $urlLike. Close it with $t.Ws.Dispose(), not Stop-CdpSession (that ends the browser).
+function Connect-CdpTarget($s, [string]$urlLike, [int]$TimeoutSec = 15) {
+  $deadline = (Get-Date).AddSeconds($TimeoutSec)
+  while ((Get-Date) -lt $deadline) {
+    $t = @((Invoke-RestMethod "http://127.0.0.1:$($s.Port)/json") | Where-Object { $_.type -eq 'page' -and $_.url -like $urlLike })[0]
+    if ($t) {
+      $ws = New-Object System.Net.WebSockets.ClientWebSocket
+      $ws.ConnectAsync([Uri]$t.webSocketDebuggerUrl, [Threading.CancellationToken]::None).Wait()
+      return [pscustomobject]@{ Ws = $ws; Proc = $s.Proc; Id = 0; Profile = $s.Profile; Port = $s.Port }
+    }
+    Start-Sleep -Milliseconds 200
+  }
+  throw "No tab matching $urlLike"
 }
 
 function Invoke-Cdp($s, [string]$method, $params = @{}) {
@@ -79,8 +95,9 @@ function Save-CdpScreenshot($s, [string]$file) {
   [IO.File]::WriteAllBytes($file, [Convert]::FromBase64String($r.data))
 }
 
-function Send-CdpMouse($s, [string]$type, [double]$x, [double]$y, [string]$button = 'left', [int]$clicks = 1) {
-  Invoke-Cdp $s 'Input.dispatchMouseEvent' @{ type = $type; x = $x; y = $y; button = $button; clickCount = $clicks; buttons = $(if ($type -eq 'mouseReleased') { 0 } else { 1 }) } | Out-Null
+# modifiers: 1 Alt, 2 Ctrl, 4 Meta, 8 Shift (as in Send-CdpKey)
+function Send-CdpMouse($s, [string]$type, [double]$x, [double]$y, [string]$button = 'left', [int]$clicks = 1, [int]$modifiers = 0) {
+  Invoke-Cdp $s 'Input.dispatchMouseEvent' @{ type = $type; x = $x; y = $y; button = $button; clickCount = $clicks; modifiers = $modifiers; buttons = $(if ($type -eq 'mouseReleased') { 0 } else { 1 }) } | Out-Null
 }
 
 function Send-CdpKey($s, [string]$key, [string]$code, [int]$keyCode, [int]$modifiers = 0) {

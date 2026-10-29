@@ -4,9 +4,12 @@ Measure directly on oscilloscope screenshots: the tool recognises the scope's sc
 reads timebase, position, V/div and 0 V levels per channel, extracts the traces, and gives you
 two draggable cursors with Δt, 1/Δt, V at each cursor, ΔV and slew rate (ΔV/Δt).
 CSV waveform exports work too, with exact sample values and time-axis zoom.
+A second page, **DPT Sweep** (`dpt.html`), overlays double-pulse-test shots and plots slew rate,
+overshoot and ringing against current, gate resistor or any other parameter.
 
 **▶ [Try it online with a demo screenshot](https://paschwuerfler.github.io/Scope-Screenshot-Analyzer/?demo)**
 · [open empty](https://paschwuerfler.github.io/Scope-Screenshot-Analyzer/)
+· [DPT sweep](https://paschwuerfler.github.io/Scope-Screenshot-Analyzer/dpt.html)
 
 ## Start
 
@@ -20,6 +23,8 @@ folder. Screenshots you load never leave your computer, even in the online versi
 - **Drag & drop** image files or whole folders anywhere onto the window
 - **Ctrl+V** pastes a screenshot from the clipboard
 - **Open files** / **Open folder** buttons
+
+Transparent areas in an image (e.g. PNGs with transparent margins) are shown as white.
 
 All loaded images appear in the strip on the left (in windows narrower than 3:2, the layout
 switches to rows: image on top, cursors and calibration below, the images as a bar at the bottom).
@@ -114,6 +119,88 @@ Display panel says so). For a `.step` simulation only the first run is loaded.
   skipped. After pasting, Paste turns into **↶ Undo** for 10 s.
 - Cursors, Multi-period mode, Copy, rename, saving and export work as for screenshots. When
   zoomed out, **←/→** move the cursor by one screen pixel instead of one sample.
+
+### Merging CSVs into one plot
+
+To compare recordings (two scope captures, or a measurement against an LTspice simulation), put
+them in one plot:
+
+1. **Drag a CSV's thumbnail onto another one** in the strip (the target shows **Merge**). You can also
+   use the **⧉** button on a thumbnail, or press **M**.
+2. The dialog lists the channels of both. Choose which to keep (at most 4), their names and which
+   channel (C1…C4) each becomes. Picking a channel that is already taken swaps the two. Channels without a name
+   from the added file are named after it, e.g. **WFM05 C1**.
+3. **Merge** adds a new view after the first one. The originals stay unless you tick *Remove the two
+   original views*. Each recording keeps its own samples and sample rate, so cursor values stay exact.
+   The new view starts with the cursors and visible time window of the first recording.
+
+**Aligning on the time axis.** The recordings start on their own time stamps (t = 0 is usually
+the trigger). The Display panel of a merged view has a **Recordings** list with a **time shift**
+per recording:
+- type a shift (e.g. `-12.5 ns`), or use the wheel or **↑/↓** in the field (1/10 of the visible
+  time/div, **Shift** = 1 div);
+- **Align**: put cursor 1 on a feature (an edge, a peak) of one curve and cursor 2 on the same feature
+  of another recording, then click **Align** in that recording's row. It moves so the feature lands on
+  cursor 1 (cursor 2 moves with it). For 10 s the button reads **↶ Undo**;
+- **Ctrl+drag a curve** in the plot slides its whole recording sideways.
+
+A merged view can be merged again with another CSV. Screenshots cannot be merged, because they
+have no sample data.
+
+## DPT sweep (double-pulse tests)
+
+Open **`dpt.html`** (or **DPT sweep** in the analyzer's toolbar). It collects many shots from
+several folders into one **pool** and compares their switching edges.
+
+1. **Drop a folder** (or **Add folder**). Files are paired per shot by the name before `_C<n>`:
+   `S05_C1.CSV` + `S05_C3.CSV` = shot `S05`. A file with several columns is a shot on its own.
+2. The **Add folder** dialog lists the shots, their measured current and the edges found. Choose
+   which channel is the **switch node** (default C1) and which the **current** (default C3), and enter
+   what is **constant in this folder**, e.g. `Rg = 10 Ω`, `Vdc = 24 V`, `Device = GaN-A`. Values are
+   pre-filled from the previous folder and from the folder name (`NOR45A24_Rg10_24V` → Rg = 10,
+   V = 24 V). The current of a shot can be overridden there.
+3. Repeat with the next folder (e.g. the same current steps with another gate resistor). Several
+   folders dropped at once open one dialog after another. **Edit** on a folder changes all of this later.
+
+The **shot current** `I` is the mean of the current channel over the whole record; `I at edge` is
+its mean over the *current window* (default 20 ns) before each edge.
+
+**Views** (all share hover and pins: hover a curve, point or row to highlight that shot everywhere,
+click to pin it, <kbd>Esc</kbd> to unpin):
+- **Overlay**: the switch node of every shown shot, aligned at the 50 % crossing of the selected edge
+  (*Rising edge 1*, *Falling edge 1*, …; <kbd>E</kbd> cycles). Colour by a numeric parameter = blue
+  ramp (dim = low, log scale when the values span more than 20×), by a text parameter = one colour
+  per value. Wheel zooms the time axis, drag pans, double-click or <kbd>F</kbd> fits.
+- **Trend**: one metric (Y) against a numeric parameter (X), one line and marker shape per value of
+  *Group by* (e.g. one line per Rg). **Log X** (<kbd>L</kbd>) helps with geometric current steps.
+  Points with a yellow dot have a warning.
+- **Table**: every shot with its parameters and metrics; click a header to sort. **Copy** gives
+  tab-separated text for Excel, **Export CSV** plain SI numbers with units in the header.
+
+**Open in the scope view**: right-click a shot (pool entry, curve, trend point or table row) and
+choose **Open in scope view**, or hover it and press <kbd>O</kbd> (with nothing hovered, <kbd>O</kbd>
+opens all pinned shots). The analyzer opens in its own tab (reused next time) with the shot as one
+CSV image (all channels), zoomed to the overlay's time window around the selected edge and with
+the cursors on its 10 % and 90 % crossings. Opening the same shot again reuses it. If nothing
+happens, allow pop-ups for the page.
+
+Checkboxes in the pool show / hide single shots or whole folders. **Export pool** saves raw data
+and parameters to a `.json` file (drop it onto the page or use **Import pool** on another computer).
+
+**Metrics** (per edge; levels are measured per edge, because the off-state level moves with
+current and the on-state level can settle slowly):
+
+| Metric | Definition |
+|---|---|
+| Levels, swing | median before the edge, and median of the second half of the time until the next edge (or record end) |
+| Slew rate 10–90 % / 20–80 % | 0.8 (0.6) × swing / time between the two level crossings |
+| Rise / fall time | time between the 10 % and 90 % crossings |
+| Peak dv/dt | largest least-squares slope over the *dv/dt window* (default 2 ns) between 10 % and 90 % |
+| Overshoot | furthest excursion beyond the final level within the *ringing window* (default 50 ns) after the 50 % crossing, 3-point smoothed |
+| Ringing pk-pk | first oscillation after the 50 % crossing: first peak minus the following valley (smoothed; 0 when there is no reversal larger than 2 % of the swing or 5× the noise) |
+
+A **!** badge marks shots with no switching edge, possibly clipped data or a level that did not
+settle within the record; hover it for the reason. The windows are set in the **Analysis** box.
 
 ## Checking / fixing the calibration
 
