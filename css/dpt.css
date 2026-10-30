@@ -34,6 +34,8 @@ code { font: 12px ui-monospace, Consolas, monospace; color: var(--fg); }
 .shot { display: flex; align-items: center; gap: 6px; padding: 1px 4px; border-radius: 4px; font-size: 12px; font-variant-numeric: tabular-nums; cursor: pointer; }
 .shot:hover, .shot.hl { background: #22303d; }
 .shot.pinned { outline: 1px solid var(--accent); }
+.shot.flash { animation: shot-flash 1.6s ease-out; }
+@keyframes shot-flash { from { background: var(--accent); } to { background: transparent; } }
 .shot.off { opacity: .45; }
 .shot.filtered .shot-label, .shot.filtered .shot-i { text-decoration: line-through; color: var(--fg-2); }
 .flt input { width: 220px; font: 12px ui-monospace, Consolas, monospace; }

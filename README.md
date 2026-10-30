@@ -188,9 +188,16 @@ click to pin it, <kbd>Esc</kbd> to unpin):
   and identical folder parameters, e.g. one setup measured three times into three folders, are
   drawn as one point at the mean with error bars (± σ or min–max, in Y and in the measured
   current) and the single values as small dots; *each shot* turns this off. Clicking such a point
-  pins all its shots; hovering shows the single values.
+  pins all its shots; hovering shows the single values. **Double-click** a point to scroll the
+  folder list on the left to that shot (its folder opens and the shot flashes), so you can read the
+  folder's parameters; the right-click menu has the same as **Show in folder list** for any view.
 - **Table**: every shot with its parameters and metrics; click a header to sort. **Copy** gives
   tab-separated text for Excel, **Export CSV** plain SI numbers with units in the header.
+  **Collapse repeats** merges shots with the same shot name and folder parameters (as Repeats does
+  in the trend plot) into one row: *Runs* gives the number of shots, the current and all metrics
+  show mean ± σ (sample standard deviation), and *Folder* the first folder + count (hover for all).
+  Clicking such a row pins all its shots. Copy / Export CSV follow it; the CSV then has a σ column
+  after each metric.
 - **Filter** (above the table, <kbd>/</kbd>): shows only matching shots in the table and both plots
   (Copy / Export CSV too); the pool list strikes the others through. Terms are separated by spaces
   and must all match: `I~10A` (around 10 A, ±10 %), `I~10A±2A`, `I~10A±20%`, `I=8..12A`, `I>5A`,

@@ -38,3 +38,7 @@ dozens of synchronous redraws in one loop give inflated numbers that real use ne
 - Headless `--dump-dom` with `--virtual-time-budget` is unreliable for the async app; use the CDP scripts.
 - A browser profile inside a sandboxed scratch dir may have broken IndexedDB, hence `%TEMP%`.
 - PowerShell variables are case-insensitive (`$S` = `$s`), and `$profile` is the built-in `$PROFILE`.
+- PowerShell 5.1 reads the BOM-less `.ps1` files as ANSI: no `±`, `σ`, `·` literals in them; build such
+  strings in JS (`String.fromCharCode`) or PowerShell (`[char]0x3c3`).
+- A tab the page opens (e.g. DPT → analyzer) comes to the front, and a background tab renders no frames:
+  `Page.captureScreenshot` then hangs forever. `Invoke-Cdp $sess 'Page.bringToFront'` after such a step.

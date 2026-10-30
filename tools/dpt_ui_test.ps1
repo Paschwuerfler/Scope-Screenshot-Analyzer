@@ -99,6 +99,21 @@ try {
   Check 'param keys' ($keys -eq 'I,Folder,Rg,Vdc') $keys
   Shot $sess 'dpt_two_groups.png'
 
+  # --- double-click a trend point with all folders collapsed -> its folder opens, the list scrolls to the shot
+  # (both folders hold the same data, so the points overlap: check whichever shot gets hit)
+  $pt = Invoke-CdpJs $sess @'
+(() => { for (const d of document.querySelectorAll('#pool-list details')) d.open = false;
+  const p = App.dpt.ui.debug().trend[15], r = document.getElementById('cv-trend').getBoundingClientRect(); return [r.left + p.X, r.top + p.Y]; })()
+'@
+  foreach ($c in 1, 2) { Send-CdpMouse $sess 'mousePressed' $pt[0] $pt[1] 'left' $c; Send-CdpMouse $sess 'mouseReleased' $pt[0] $pt[1] 'left' $c }
+  $rv = Invoke-CdpJs $sess @"
+(() => { const li = document.querySelector('#pool-list .shot.flash'), L = document.getElementById('pool-list').getBoundingClientRect(), r = li ? li.getBoundingClientRect() : {};
+  return JSON.stringify({ open: !!li && li.closest('details').open, inView: r.top >= L.top && r.bottom <= L.bottom, flash: !!li, pins: App.dpt.ui.debug().pinned.length }); })()
+"@
+  Invoke-CdpJs $sess 'for (const d of document.querySelectorAll("#pool-list details")) d.open = true; true' | Out-Null
+  Check 'double-click trend point reveals shot in folder list' ($rv -eq '{"open":true,"inView":true,"flash":true,"pins":0}') $rv
+  Send-CdpMouse $sess 'mouseMoved' 10 990
+
   # --- group by two keys: Rg + Folder -> one line per pair, labels name both
   Invoke-CdpJs $sess "($setGroupJs)(1, 'Folder')" | Out-Null
   $g = Invoke-CdpJs $sess 'App.dpt.ui.debug().groups.map(c => c.split(String.fromCharCode(183)).map(s => s.trim()).join("+")).join("|")'
@@ -178,6 +193,8 @@ try {
     Start-Sleep -Milliseconds 800
     Check 'O reuses the open shot' ((Invoke-CdpJs $scope 'App.docs.list().length') -eq 1)
   } finally { $scope.Ws.Dispose() }
+  # the analyzer tab came to the front; a background tab renders no frames, so screenshots would hang
+  Invoke-Cdp $sess 'Page.bringToFront' | Out-Null
 
   # --- repeats: give folder 2 the parameters of folder 1, so every shot pair merges into one point
   $n0 = Invoke-CdpJs $sess 'App.dpt.ui.debug().trend.length'
@@ -189,6 +206,21 @@ try {
   Set-Select $sess 'sel-repeats' 'off'
   Check 'Repeats: each shot shows all points' ((Invoke-CdpJs $sess 'App.dpt.ui.debug().trend.length') -eq $n0)
   Set-Select $sess 'sel-repeats' 'sd'
+  # table: Collapse repeats -> one row per pair with runs and mean ± σ; clicking it pins both shots
+  $r0 = Invoke-CdpJs $sess 'document.querySelectorAll("#tbl tr[data-row]").length'
+  Invoke-CdpJs $sess '(() => { const c = document.querySelector("#tgl-collapse"); c.click(); return c.checked; })()' | Out-Null
+  $r1 = Invoke-CdpJs $sess 'document.querySelectorAll("#tbl tr[data-row]").length'
+  Check 'Collapse repeats: one table row per pair' ($r1 * 2 -eq $r0) "$r0 -> $r1"
+  # String.fromCharCode: PowerShell 5.1 reads this file as ANSI
+  $cr = Invoke-CdpJs $sess '(() => { const t = document.querySelector("#tbl"), runs = [...t.querySelectorAll("th")].findIndex(th => th.dataset.col === "runs"); const tr = t.querySelector("tr[data-ids]"); return JSON.stringify({ runs: runs >= 0 ? tr.children[runs].textContent : null, pm: tr.textContent.includes(" " + String.fromCharCode(177) + " ") }); })()'
+  Check 'collapsed row shows runs and mean +- sigma' ($cr -eq '{"runs":"2","pm":true}') $cr
+  $hd = Invoke-CdpJs $sess 'App.dpt.ui.tableText(",").split("\n")[0]'
+  Check 'CSV has sigma columns when collapsed' ($hd.Contains('Overshoot ' + [char]0x3c3 + ' [V]')) $hd
+  Invoke-CdpJs $sess 'App.dpt.ui.unpinAll(); document.querySelector("#tbl tr[data-ids]").click(); true' | Out-Null
+  Check 'clicking a collapsed row pins all its shots' ((Invoke-CdpJs $sess 'App.dpt.ui.debug().pinned.length') -eq 2)
+  Shot $sess 'dpt_table_collapsed.png'
+  Invoke-CdpJs $sess 'App.dpt.ui.unpinAll(); document.querySelector("#tgl-collapse").click(); true' | Out-Null
+  Check 'uncollapse restores the rows' ((Invoke-CdpJs $sess 'document.querySelectorAll("#tbl tr[data-row]").length') -eq $r0)
   Invoke-CdpJs $sess '(() => { const b = App.dpt.pool.batches[1]; return App.dpt.pool.updateBatch(b.id, { params: window.__p }).then(() => true); })()' | Out-Null
 
   # --- new parameter in folder 2 -> asked for the value of folder 1, Enter fills it in

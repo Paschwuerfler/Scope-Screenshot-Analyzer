@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DPT Sweep</title>
 <!-- ?v=N: same cache-busting number as index.html, bump both on every publish -->
-<link rel="stylesheet" href="css/app.css?v=11">
-<link rel="stylesheet" href="css/dpt.css?v=11">
+<link rel="stylesheet" href="css/app.css?v=12">
+<link rel="stylesheet" href="css/dpt.css?v=12">
 </head>
 <body class="empty">
 
@@ -70,6 +70,7 @@
         <label class="flt">Filter <input id="flt" spellcheck="false" autocomplete="off" placeholder="e.g. I~10A  RHR=330"
           title="Show only matching shots in table and plots (/). Terms separated by spaces, all must match:&#10;I~10A  around 10 A (±10 %) · I~10A±2A · I~10±20%&#10;I=8..12A  range · I>5A · I<=2A · ~10A (no key = I)&#10;RHR=330 · VCC!=24 · Folder=33045A24&#10;plain text: folder or shot name contains it&#10;Esc clears"></label>
         <button id="flt-clear" class="small" title="Clear the filter" hidden>×</button>
+        <label title="One row per set of repeats (same shot name and folder parameters): number of runs, measured values as mean ± σ"><input type="checkbox" id="tgl-collapse"> Collapse repeats</label>
         <span class="spacer"></span>
         <button data-act="copy-table" title="Copy the table as tab-separated text, e.g. for Excel (C)">Copy</button>
         <button data-act="export-csv" title="Save the table as CSV (values in SI units)">Export CSV</button>
@@ -134,7 +135,8 @@
     <tr><td><kbd>O</kbd></td><td>Open the hovered shot (else the pinned shots) in the scope view</td></tr>
     <tr><td><kbd>Esc</kbd></td><td>Unpin all shots</td></tr>
     <tr><td>Hover / click</td><td>Hover a curve, point or row to highlight that shot everywhere; click to pin it</td></tr>
-    <tr><td>Right-click</td><td>On a shot (list, plot, table row): open it in the scope view, zoomed to the selected edge with cursors at 10 / 90 %</td></tr>
+    <tr><td>Double-click</td><td>On a trend point: scroll the folder list to that shot, so its folder parameters are in view</td></tr>
+    <tr><td>Right-click</td><td>On a shot (list, plot, table row): open it in the scope view, zoomed to the selected edge with cursors at 10 / 90 %, or show it in the folder list</td></tr>
   </table>
   <h4>Metrics (per edge, between the levels before and after it)</h4>
   <table>
@@ -149,13 +151,13 @@
   <div class="dialog-actions"><button data-act="close">Close</button></div>
 </dialog>
 
-<script src="js/util.js?v=11"></script>
-<script src="js/series.js?v=11"></script>
-<script src="js/loaders.js?v=11"></script>
-<script src="js/dpt/edges.js?v=11"></script>
-<script src="js/dpt/pool.js?v=11"></script>
-<script src="js/dpt/plot.js?v=11"></script>
-<script src="js/dpt/ui.js?v=11"></script>
-<script src="js/dpt/app.js?v=11"></script>
+<script src="js/util.js?v=12"></script>
+<script src="js/series.js?v=12"></script>
+<script src="js/loaders.js?v=12"></script>
+<script src="js/dpt/edges.js?v=12"></script>
+<script src="js/dpt/pool.js?v=12"></script>
+<script src="js/dpt/plot.js?v=12"></script>
+<script src="js/dpt/ui.js?v=12"></script>
+<script src="js/dpt/app.js?v=12"></script>
 </body>
 </html>

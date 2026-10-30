@@ -6,7 +6,7 @@ App.dpt.ui = (() => {
   const P = App.dpt.plot, U = App.util, pool = App.dpt.pool;
   const esc = U.escapeHtml;
   const PREFS_KEY = 'dpt-prefs';
-  const prefs = Object.assign({ edge: null, color: 'I', metric: 'slew1090', x: 'I', groups: ['Folder'], repeats: 'sd', logX: false, filter: '', sort: null, view: null }, loadPrefs());
+  const prefs = Object.assign({ edge: null, color: 'I', metric: 'slew1090', x: 'I', groups: ['Folder'], repeats: 'sd', logX: false, filter: '', sort: null, view: null, collapse: false }, loadPrefs());
   if (typeof prefs.group === 'string') { prefs.groups = prefs.group ? [prefs.group] : []; delete prefs.group; }   // prefs before multi-key grouping
   let hover = null;              // shot id under the mouse (any view)
   const pinned = new Set();      // shot ids pinned by click
@@ -244,10 +244,29 @@ App.dpt.ui = (() => {
     list.addEventListener('mouseover', e => { const s = e.target.closest('[data-shot]'); setHover(s ? s.dataset.shot : null); });
     list.addEventListener('mouseleave', () => setHover(null));
   }
+  /** Scroll the pool list to a shot (opening its folder) so the folder parameters are in view, and flash it. */
+  function revealShot(id) {
+    const li = $('#pool-list').querySelector(`[data-shot="${id}"]`);
+    if (!li) return;
+    const det = li.closest('details');
+    det.open = true;
+    collapsed.delete(det.dataset.batch);
+    // the folder header holds the parameters: show it too when the folder fits, else centre the shot
+    const list = $('#pool-list'), L = list.getBoundingClientRect();
+    const top = det.getBoundingClientRect().top - L.top + list.scrollTop, bottom = li.getBoundingClientRect().bottom - L.top + list.scrollTop;
+    list.scrollTop = bottom - top <= list.clientHeight ? top - 6 : bottom - list.clientHeight / 2;
+    li.classList.remove('flash'); void li.offsetWidth; li.classList.add('flash');
+  }
 
   // ---------------------------------------------------------------- highlight (hover / pin)
   function setHover(id) { if (hover === id) return; hover = id; syncHighlight(); }
   function togglePin(id) { if (pinned.has(id)) pinned.delete(id); else pinned.add(id); syncHighlight(); }
+  /** Pin all ids, or unpin them when all are pinned already (repeat point, collapsed table entry). */
+  function togglePins(ids) {
+    const on = !ids.every(id => pinned.has(id));
+    for (const id of ids) if (on) pinned.add(id); else pinned.delete(id);
+    syncHighlight();
+  }
   function unpinAll() { pinned.clear(); syncHighlight(); }
   function syncHighlight(redraw = true) {
     for (const el of document.querySelectorAll('[data-shot]')) {
@@ -255,8 +274,9 @@ App.dpt.ui = (() => {
       el.classList.toggle('pinned', pinned.has(el.dataset.shot));
     }
     for (const el of document.querySelectorAll('#tbl tr[data-row]')) {
-      el.classList.toggle('hl', el.dataset.row === hover);
-      el.classList.toggle('pinned', pinned.has(el.dataset.row));
+      const ids = rowIds(el);
+      el.classList.toggle('hl', ids.includes(hover));
+      el.classList.toggle('pinned', ids.some(id => pinned.has(id)));
     }
     if (redraw) { drawOverlay(); drawTrend(); }
     const r = hover && allRows().find(x => x.shot.id === hover);
@@ -564,47 +584,93 @@ App.dpt.ui = (() => {
     });
     cv.addEventListener('pointerleave', () => { tip.style.display = 'none'; setHover(null); });
     cv.addEventListener('click', e => { const b = cv.getBoundingClientRect(), hit = trendHit(e.clientX - b.left, e.clientY - b.top); if (!hit) return;
-      // a repeat point pins / unpins all its shots together
-      const on = !hit.rows.every(r => pinned.has(r.shot.id));
-      for (const r of hit.rows) if (on) pinned.add(r.shot.id); else pinned.delete(r.shot.id);
-      syncHighlight();
+      togglePins(hit.rows.map(r => r.shot.id));   // a repeat point pins / unpins all its shots together
     });
+    // the two clicks before it pin and unpin again, so double-click leaves the pins as they were
+    cv.addEventListener('dblclick', e => { const b = cv.getBoundingClientRect(), hit = trendHit(e.clientX - b.left, e.clientY - b.top); if (hit) revealShot(hit.r.shot.id); });
   }
 
   // ---------------------------------------------------------------- table
+  /** Table columns. spread: measured value, shown as mean ± σ in a collapsed entry; entry: value of the whole entry. */
   function columns() {
     const params = pool.paramKeys().filter(k => !k.builtin);
-    const num = (key, label, get, fmt) => ({ key, label, get, fmt });
     return [
       { key: 'folder', label: 'Folder', txt: true, get: r => r.batch.name },
       { key: 'shot', label: 'Shot', txt: true, get: r => r.shot.label },
+      ...(prefs.collapse ? [{ key: 'runs', label: 'Runs', entry: e => e.rows.length }] : []),
       ...params.map(k => ({ key: 'p:' + k.key, label: k.key, txt: !k.numeric, unit: k.unit, get: r => r.p[k.key], fmt: v => fmtParam(k.key, v) })),
-      num('I', 'I', r => r.p.I, v => U.formatSI(v, 'A', 3)),
-      ...METRICS.map(m => ({ key: m.key, label: m.label.replace(' (1st oscillation)', '').replace(' (% of swing)', ' %'), unit: m.unit, get: r => r.edge[m.key], fmt: v => fmtMetric(m, v) })),
+      { key: 'I', label: 'I', unit: 'A', spread: true, get: r => r.p.I, fmt: v => U.formatSI(v, 'A', 3) },
+      ...METRICS.map(m => ({ key: m.key, label: m.label.replace(' (1st oscillation)', '').replace(' (% of swing)', ' %'), unit: m.unit, spread: true, get: r => r.edge[m.key], fmt: v => fmtMetric(m, v) })),
       { key: 'warn', label: 'Notes', txt: true, get: r => [...r.shot.res.warn, ...r.edge.warn].join('; ') },
     ];
   }
-  function sortedRows() {
-    const rows = shownRows(), s = prefs.sort;
-    if (!s) return rows;
-    const c = columns().find(x => x.key === s.key);
-    if (!c) return rows;
-    const val = r => c.get(r);
-    return rows.slice().sort((a, b) => {
-      const x = val(a), y = val(b);
-      const d = typeof x === 'number' && typeof y === 'number' ? x - y : U.naturalCompare(String(x ?? ''), String(y ?? ''));
-      return s.desc ? -d : d;
+  /**
+   * Table entries { rows, r (first row), off }. With prefs.collapse, shots with the same shot name and folder
+   * parameters (repeats, as in the trend plot but regardless of Group by) form one entry; its hidden shots
+   * only count when all of them are hidden.
+   */
+  function tableEntries() {
+    const rows = shownRows();
+    if (!prefs.collapse) return rows.map(r => ({ rows: [r], r, off: r.shot.hidden }));
+    const keys = pool.paramKeys().filter(k => !k.builtin).map(k => k.key), sets = new Map();
+    for (const r of rows) {
+      const id = JSON.stringify([r.shot.label, ...keys.map(k => r.p[k])]);
+      if (!sets.has(id)) sets.set(id, []);
+      sets.get(id).push(r);
+    }
+    return [...sets.values()].map(all => {
+      const on = all.filter(r => !r.shot.hidden), list = on.length ? on : all;
+      return { rows: list, r: list[0], off: !on.length };
     });
   }
+  /** Value of a column for an entry: { v } or, for a spread column over several shots, { v: mean, sd: sample σ, n }. */
+  function cellOf(c, e) {
+    if (c.entry) return { v: c.entry(e) };
+    if (e.rows.length === 1) return { v: c.get(e.r) };
+    const vals = e.rows.map(c.get);
+    if (!c.spread) {
+      const set = [...new Set(vals.map(v => v ?? ''))].filter(v => v !== '');
+      return { v: set.length === 1 ? set[0] : set.join(c.key === 'warn' ? '; ' : ', '), all: set };
+    }
+    const xs = vals.filter(v => typeof v === 'number' && isFinite(v));
+    if (!xs.length) return { v: null };
+    const mu = xs.reduce((s, v) => s + v, 0) / xs.length;
+    const sd = xs.length > 1 ? Math.sqrt(xs.reduce((s, v) => s + (v - mu) ** 2, 0) / (xs.length - 1)) : null;
+    return { v: mu, sd, n: xs.length };
+  }
+  /** "16.6 ± 0.12 V/ns": σ to 2 digits in the same unit prefix as the mean. */
+  function fmtCell(c, x) {
+    const s = c.fmt ? c.fmt(x.v) : String(x.v ?? '');
+    if (x.sd === null || x.sd === undefined) return s;
+    const m = /^(-?[\d.]+(?:e[-+]?\d+)?)\s*(.*)$/.exec(s), scale = m && Number(m[1]) / x.v;
+    if (!m || !isFinite(scale) || !scale) return `${s} ± ${c.fmt(x.sd)}`;
+    return `${m[1]} ± ${Number((x.sd * scale).toPrecision(2))}${m[2] ? ' ' + m[2] : ''}`;
+  }
+  function sortedEntries() {
+    const ents = tableEntries(), s = prefs.sort;
+    if (!s) return ents;
+    const c = columns().find(x => x.key === s.key);
+    if (!c) return ents;
+    const val = e => cellOf(c, e).v;
+    return ents.map(e => [e, val(e)]).sort(([, x], [, y]) => {
+      const d = typeof x === 'number' && typeof y === 'number' ? x - y : U.naturalCompare(String(x ?? ''), String(y ?? ''));
+      return s.desc ? -d : d;
+    }).map(([e]) => e);
+  }
+  const rowIds = tr => (tr.dataset.ids || tr.dataset.row).split(' ');
   function renderTable() {
-    const cols = columns(), rows = sortedRows(), s = prefs.sort;
-    const total = allRows().length;
-    $('#tbl-title').textContent = prefs.edge ? `${EDGE_LABEL(prefs.edge)} · ${rows.length < total ? `${rows.length} of ${total}` : rows.length} shots` : 'Edges';
+    const cols = columns(), ents = sortedEntries(), s = prefs.sort;
+    const total = allRows().length, n = ents.reduce((k, e) => k + e.rows.length, 0);
+    const shots = `${n < total ? `${n} of ${total}` : n} shots`;
+    $('#tbl-title').textContent = !prefs.edge ? 'Edges' : `${EDGE_LABEL(prefs.edge)} · ${prefs.collapse ? `${ents.length} entries from ${shots}` : shots}`;
+    $('#tgl-collapse').checked = prefs.collapse;
     $('#tbl').className = 'grid-table';
     $('#tbl').innerHTML = `<thead><tr>${cols.map(c => `<th data-col="${esc(c.key)}" class="${c.txt ? 'txt' : ''}${s && s.key === c.key ? ' sorted' + (s.desc ? ' desc' : '') : ''}" title="Sort">${esc(c.label)}</th>`).join('')}</tr></thead>
-      <tbody>${rows.map(r => `<tr data-row="${r.shot.id}" class="${r.shot.hidden ? 'off' : ''}">${cols.map(c => {
-        const v = c.get(r);
-        return `<td class="${c.txt ? 'txt' : ''}">${esc(c.fmt ? c.fmt(v) : v ?? '')}</td>`;
+      <tbody>${ents.map(e => `<tr data-row="${e.r.shot.id}"${e.rows.length > 1 ? ` data-ids="${e.rows.map(r => r.shot.id).join(' ')}"` : ''} class="${e.off ? 'off' : ''}">${cols.map(c => {
+        const x = cellOf(c, e);
+        // several folders: the first one + count, all of them in the tooltip
+        if (x.all && c.key === 'folder' && x.all.length > 1) return `<td class="txt" title="${esc(x.v)}">${esc(x.all[0])} +${x.all.length - 1}</td>`;
+        return `<td class="${c.txt ? 'txt' : ''}"${x.sd !== undefined ? ` title="mean ± σ of ${x.n} shot(s)"` : ''}>${esc(fmtCell(c, x))}</td>`;
       }).join('')}</tr>`).join('')}</tbody>`;
     syncHighlight(false);
   }
@@ -618,20 +684,29 @@ App.dpt.ui = (() => {
         savePrefs(); renderTable(); return;
       }
       const tr = e.target.closest('tr[data-row]');
-      if (tr) togglePin(tr.dataset.row);
+      if (tr) togglePins(rowIds(tr));
     });
     t.addEventListener('mouseover', e => { const tr = e.target.closest('tr[data-row]'); setHover(tr ? tr.dataset.row : null); });
     t.addEventListener('mouseleave', () => setHover(null));
+    $('#tgl-collapse').addEventListener('change', e => { prefs.collapse = e.target.checked; savePrefs(); renderTable(); });
   }
-  /** Table as text. sep '\t' = formatted for pasting, ',' = CSV with plain SI numbers and units in the header. */
+  /**
+   * Table as text. sep '\t' = formatted for pasting, ',' = CSV with plain SI numbers and units in the header.
+   * Collapsed entries: mean ± σ in one cell, in CSV the mean plus a σ column after each measured column.
+   */
   function tableText(sep) {
-    const cols = columns(), rows = sortedRows().filter(r => !r.shot.hidden);
+    const cols = columns(), ents = sortedEntries().filter(e => !e.off), sd = sep === ',' && prefs.collapse;
     const cell = s => { s = String(s ?? ''); return sep === ',' && /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s.replace(/\t/g, ' '); };
-    const head = cols.map(c => cell(sep === ',' && c.unit ? `${c.label} [${c.unit}]` : c.label)).join(sep);
-    const body = rows.map(r => cols.map(c => {
-      const v = c.get(r);
-      if (sep === ',') return cell(typeof v === 'number' ? (isFinite(v) ? String(v) : '') : v);
-      return cell(c.fmt ? c.fmt(v) : v);
+    const num = v => typeof v === 'number' ? (isFinite(v) ? String(v) : '') : v;
+    const head = cols.flatMap(c => {
+      const h = [cell(sep === ',' && c.unit ? `${c.label} [${c.unit}]` : c.label)];
+      if (sd && c.spread) h.push(cell(`${c.label} σ${c.unit ? ` [${c.unit}]` : ''}`));
+      return h;
+    }).join(sep);
+    const body = ents.map(e => cols.flatMap(c => {
+      const x = cellOf(c, e);
+      if (sep !== ',') return [cell(fmtCell(c, x))];
+      return sd && c.spread ? [cell(num(x.v)), cell(num(x.sd ?? ''))] : [cell(num(x.v))];
     }).join(sep));
     return [head, ...body].join('\n');
   }
@@ -795,6 +870,7 @@ App.dpt.ui = (() => {
     open: id => App.dpt.app.openInScope([id]),
     'open-pinned': () => App.dpt.app.openInScope([...pinned]),
     pin: id => togglePin(id),
+    reveal: id => revealShot(id),
   };
   function openMenu(e) {
     const id = shotAt(e), sh = id && pool.shots.find(s => s.id === id);
@@ -805,7 +881,8 @@ App.dpt.ui = (() => {
     m.innerHTML = `<div class="ctx-head">${esc(pool.batchOf(sh).name)} / ${esc(sh.label)}</div>
       <button data-ctx="open" title="Open this shot in the analyzer, zoomed to the selected edge (O)">Open in scope view</button>
       ${many ? `<button data-ctx="open-pinned">Open all ${pinned.size} pinned shots</button>` : ''}
-      <button data-ctx="pin">${pinned.has(id) ? 'Unpin' : 'Pin'}</button>`;
+      <button data-ctx="pin">${pinned.has(id) ? 'Unpin' : 'Pin'}</button>
+      <button data-ctx="reveal" title="Scroll the folder list to this shot (double-click a trend point)">Show in folder list</button>`;
     m.style.display = 'block';
     m.style.left = Math.min(e.clientX, innerWidth - m.offsetWidth - 4) + 'px';
     m.style.top = Math.min(e.clientY, innerHeight - m.offsetHeight - 4) + 'px';
