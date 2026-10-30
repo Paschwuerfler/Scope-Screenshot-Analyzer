@@ -113,10 +113,44 @@ App.dpt.app = (() => {
     return sh.files.map(f => ({ name: `${name} · ${f.name}`, notes, csv: f.text, names: {}, edge }));
   }
 
-  function openInScope(ids) {
-    const shots = ids.map(id => pool.shots.find(s => s.id === id)).filter(Boolean);
+  /**
+   * One analyzer doc with the switch node of up to 4 shots (repeats of one trend point) as C1..C4, no
+   * current. Time axis = the first shot's; the others are shifted so their 50 % crossings of the selected
+   * edge coincide with it, interpolated onto its grid and cut to the span all of them cover.
+   */
+  function overlayDoc(shots) {
+    const ek = ui.prefs.edge, edgeOf = sh => sh.res && sh.res.edges.find(x => x.kind + x.n === ek);
+    const cols = shots.map(sh => sh.cols[pool.batchOf(sh).roles.sw]);
+    if (cols.some(c => !c)) return null;
+    const e0 = edgeOf(shots[0]), t50 = shots.map(sh => (edgeOf(sh) || e0 || { t50: 0 }).t50), a = cols[0];
+    const shift = shots.map((sh, k) => t50[k] - t50[0]);   // shot k at time t of shot 0 = its own time t + shift
+    const valueAt = (c, t) => { const x = (t - c.t0) / c.dt, i = Math.floor(x); return i < 0 || i >= c.v.length - 1 ? null : c.v[i] + (c.v[i + 1] - c.v[i]) * (x - i); };
+    const lines = [['Time in s', ...cols.map((c, k) => `C${k + 1} in ${c.unit || 'V'}`)].join(',')];
+    for (let i = 0; i < a.v.length; i++) {
+      const t = a.t0 + i * a.dt, vs = cols.map((c, k) => k ? valueAt(c, t + shift[k]) : c.v[i]);
+      if (vs.every(v => v !== null)) lines.push([t.toPrecision(9), ...vs.map(v => v.toPrecision(7))].join(','));
+    }
+    if (lines.length < 3) return null;
+    const b0 = pool.batchOf(shots[0]), fmt = p => p.value !== null ? App.util.formatSI(p.value, p.unit, 4) : p.text;
+    const params = b0.params.filter(p => p.key), w = ui.overlayWindow(), folders = shots.map(sh => pool.batchOf(sh).name);
+    const name = [shots[0].label, ...params.map(fmt), `${shots.length} runs`].join(' · ') + ` (switch node, ${ek || 'no edge'})`;
+    return {
+      name, csv: lines.join('\n'),
+      names: Object.fromEntries(folders.map((f, k) => [`C${k + 1}`, f])),
+      notes: [`DPT shot ${shots[0].label}: switch node of ${shots.length} runs, aligned at the 50 % crossing of ${ek || 'the record start'}`,
+        ...params.map(p => `${p.key} = ${fmt(p)}`), ...shots.map((sh, k) => `C${k + 1} = ${folders[k]} (I = ${App.util.formatSI(pool.shotCurrent(sh), 'A', 3)})`)].join('\n'),
+      edge: e0 ? { t1: e0.t10 ?? e0.t50, t2: e0.t90 ?? e0.t50, a: e0.t50 + w.a, b: e0.t50 + w.b } : null,
+    };
+  }
+
+  /** ids: shots to open, one analyzer image each; together: their switch nodes in one plot (overlayDoc). */
+  function openInScope(ids, together = false) {
+    let shots = ids.map(id => pool.shots.find(s => s.id === id)).filter(Boolean);
     if (!shots.length) { ui.toast('Hover or pin a shot first.'); return; }
-    const msg = { type: 'scope-open', id: App.util.uid(), docs: shots.flatMap(scopeDocs) };
+    if (together && shots.length > 4) { ui.toast(`A scope view has 4 channels: showing the first 4 of ${shots.length} runs.`); shots = shots.slice(0, 4); }
+    const one = together ? overlayDoc(shots) : null;
+    if (together && !one) { ui.toast('These shots have no common time span to show together.'); return; }
+    const msg = { type: 'scope-open', id: App.util.uid(), docs: one ? [one] : shots.flatMap(scopeDocs) };
     let win = window.open('', SCOPE_WIN), loaded = true;
     if (!win) { ui.toast('The browser blocked opening the analyzer tab. Allow pop-ups for this page.'); return; }
     // a fresh named window is about:blank (readable); an existing analyzer tab may be unreadable on file://
@@ -125,7 +159,7 @@ App.dpt.app = (() => {
     handoff = { win, msg };
     if (loaded) win.postMessage(msg, '*');
     win.focus();
-    ui.toast(`Opening ${shots.length > 1 ? shots.length + ' shots' : shots[0].label} in the scope view…`);
+    ui.toast(`Opening ${one ? `${shots.length} runs of ${shots[0].label} in one plot` : shots.length > 1 ? shots.length + " shots" : shots[0].label} in the scope view…`);
   }
   window.addEventListener('message', e => {
     if (!handoff || e.source !== handoff.win || !e.data) return;
@@ -201,5 +235,5 @@ App.dpt.app = (() => {
   }
 
   init();
-  return { addFiles, byFolder, openInScope, shotCsv, scopeLabel };
+  return { addFiles, byFolder, openInScope, shotCsv, scopeLabel, overlayDoc };
 })();

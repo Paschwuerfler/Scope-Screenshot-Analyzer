@@ -71,10 +71,14 @@ modules under `App.dpt`:
   Hiding also unpins (a pinned but undrawn shot would dim all others). Repeats are grouped the same way
   in trend (`trendPoints`), table (`tableEntries`) and pool list (`poolEntries`): shot name + all
   non-built-in parameter values; merged list items / rows carry `data-ids`, read with `rowIds()`.
+  Pool list options (`prefs.poolCollapse`, `prefs.poolFolders`) and the per-folder filter count
+  (`.flt-n`, `flt-part` / `flt-all` / `flt-none`) are rendered in `renderPool`.
 - **Open in scope view** (context menu in `ui.js`, `openInScope` in `app.js`): the DPT page opens
   `index.html` as the named tab `scope-analyzer` and sends
   `{ type: 'scope-open', id, docs: [{ name, notes, csv, names, edge: {t1, t2, a, b} }] }` by `postMessage`
-  (name and notes from `App.dpt.app.scopeLabel`)
+  (name and notes from `App.dpt.app.scopeLabel`; `openInScope(ids, true)` instead sends one doc from
+  `overlayDoc`: the switch node of up to 4 repeat shots as C1..C4, interpolated onto the first shot's
+  grid with their t50 of the selected edge aligned, cut to the common span)
   (works between file:// pages, no shared storage needed). The shot's channels are merged into one
   CSV. The analyzer (`App.loaders.initHandoff`, only when `window.opener` is set) posts
   `scope-ready` once its session is restored and `scope-ack` per payload; the DPT page resends

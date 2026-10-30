@@ -6,7 +6,7 @@ App.dpt.ui = (() => {
   const P = App.dpt.plot, U = App.util, pool = App.dpt.pool;
   const esc = U.escapeHtml;
   const PREFS_KEY = 'dpt-prefs';
-  const prefs = Object.assign({ edge: null, color: 'I', metric: 'slew1090', x: 'I', groups: ['Folder'], repeats: 'sd', logX: false, filter: '', sort: null, view: null, collapse: false, poolCollapse: false }, loadPrefs());
+  const prefs = Object.assign({ edge: null, color: 'I', metric: 'slew1090', x: 'I', groups: ['Folder'], repeats: 'sd', logX: false, filter: '', sort: null, view: null, collapse: false, poolCollapse: false, poolFolders: false }, loadPrefs());
   if (typeof prefs.group === 'string') { prefs.groups = prefs.group ? [prefs.group] : []; delete prefs.group; }   // prefs before multi-key grouping
   let hover = null;              // shot id under the mouse (any view)
   const pinned = new Set();      // shot ids pinned by click
@@ -208,6 +208,13 @@ App.dpt.ui = (() => {
     }
     return [...sets.values()];
   }
+  /** "8.2 A – 12.1 A" over the shot currents of these rows. */
+  function currentRange(rows) {
+    const I = rows.map(r => r.p.I).filter(v => typeof v === 'number' && isFinite(v));
+    if (!I.length) return '–';
+    const lo = Math.min(...I), hi = Math.max(...I);
+    return lo === hi ? U.formatSI(lo, 'A', 3) : `${U.formatSI(lo, 'A', 3)} – ${U.formatSI(hi, 'A', 3)}`;
+  }
   /** Checkbox state attributes for a set of shots: checked when all are shown, indeterminate when some are. */
   const checkAttrs = sh => { const on = sh.filter(s => !s.hidden).length; return `${on === sh.length ? ' checked' : ''}${on && on < sh.length ? ' data-mixed="1"' : ''}`; };
   function renderPool() {
@@ -215,6 +222,8 @@ App.dpt.ui = (() => {
     const n = pool.shots.length;
     $('#pool-count').textContent = n ? `${pool.batches.length} folder${pool.batches.length > 1 ? 's' : ''} · ${n} shots` : '';
     $('#tgl-pool-collapse').checked = prefs.poolCollapse;
+    $('#tgl-pool-folders').checked = prefs.poolFolders;
+    $('#pool-list').classList.toggle('folders-only', prefs.poolFolders);
     $('#unhide-all').hidden = !tmpHidden.size;
     $('#unhide-all').textContent = `Unhide all (${tmpHidden.size})`;
     $('#pool-list').innerHTML = poolEntries().map(bs => {
@@ -225,12 +234,19 @@ App.dpt.ui = (() => {
       // shots by name: one item per shot, or per set of repeats when the entry holds several folders
       const items = new Map();
       for (const s of sh) { const k = many ? s.label : s.id; if (!items.has(k)) items.set(k, []); items.get(k).push(s); }
-      return `<details class="batch${many ? ' repeats' : ''}" data-batch="${b.id}" data-batches="${[...ids].join(' ')}"${collapsed.has(b.id) ? '' : ' open'}>
+      // filter at a glance: how many of the folder's shots still pass, and their current range
+      const rs = sh.map(s => byShot.get(s.id)).filter(Boolean), hit = flt.n ? rs.filter(flt.test) : rs;
+      const fcls = !flt.n ? '' : !hit.length ? ' flt-none' : hit.length < rs.length ? ' flt-part' : ' flt-all';
+      const match = flt.n && !hit.length ? 'Filter: no shot matches' :
+        `${flt.n ? `Filter: ${hit.length} of ${rs.length} shots · ` : ''}I ${currentRange(hit)}`;
+      return `<details class="batch${many ? ' repeats' : ''}${fcls}" data-batch="${b.id}" data-batches="${[...ids].join(' ')}"${collapsed.has(b.id) && !prefs.poolFolders ? '' : ' open'}>
         <summary><input type="checkbox" data-bact="toggle" title="Show / hide all shots of ${many ? 'these folders' : 'this folder'} (saved)"${checkAttrs(sh)}>
+          ${flt.n ? `<span class="flt-n" title="Shots of this entry that pass the filter">${hit.length}/${rs.length}</span>` : ''}
           <span class="batch-name" title="${esc(names)}">${esc(b.name)}${many ? ` <span class="muted">+${bs.length - 1}</span>` : ''}</span><span class="muted">${many ? `${bs.length} runs · ` : ''}${sh.length}</span>
           <span class="batch-btns"><button data-bact="hide" title="${anyTmp ? 'Show the hidden shots again' : 'Hide all shots for now (until Unhide or reload)'}">${anyTmp ? 'Unhide' : 'Hide'}</button>${many ? '' :
           `<button data-bact="edit" title="Edit name, parameters, channels and shot currents">Edit</button><button data-bact="remove" class="danger" title="Remove this folder from the pool">×</button>`}</span></summary>
-        <div class="batch-params">${many ? `<div title="Untick Collapse repeats to edit a single folder">${esc(names)}</div>` : ''}${params || '<i>no parameters</i>'} · ${esc(b.roles.sw)} switch node, ${esc(b.roles.cur || 'no')} current</div>
+        <div class="batch-params">${many ? `<div title="Untick Collapse repeats to edit a single folder">${esc(names)}</div>` : ''}${params || '<i>no parameters</i>'} · ${esc(b.roles.sw)} switch node, ${esc(b.roles.cur || 'no')} current
+          ${flt.n || prefs.poolFolders ? `<div class="batch-match">${match}</div>` : ''}</div>
         <ul class="shot-list">${[...items.values()].map(list => {
           const s = list[0], rs = list.map(x => byShot.get(x.id)).filter(Boolean), r = rs[0];
           const warn = [...new Set(list.flatMap(x => shotWarnings(x, (byShot.get(x.id) || {}).edge)))];
@@ -275,8 +291,10 @@ App.dpt.ui = (() => {
       } else if (sact === 'toggle' && sEl) pool.updateShots(rowIds(sEl), { hidden: !e.target.checked });
       else if (sact === 'unhide' && sEl) unhideShots(rowIds(sEl));
       else if (sEl) togglePins(rowIds(sEl));
+      else if (prefs.poolFolders && !bact && !e.target.closest('input, button') && e.target.closest('summary')) e.preventDefault();   // folders only: keep the entry open
     });
     $('#tgl-pool-collapse').addEventListener('change', e => { prefs.poolCollapse = e.target.checked; savePrefs(); renderPool(); });
+    $('#tgl-pool-folders').addEventListener('change', e => { prefs.poolFolders = e.target.checked; savePrefs(); renderPool(); });
     $('#unhide-all').addEventListener('click', unhideAll);
     list.addEventListener('toggle', e => {
       const id = e.target.dataset && e.target.dataset.batch;
@@ -651,10 +669,18 @@ App.dpt.ui = (() => {
     tipLock = { ids };
     const tip = $('#tip-trend');
     tip.classList.add('locked');
+    // repeats: pick the run to open, or all switch nodes in one plot
+    const open = ids.length < 2 ? '<button data-tip="open" title="Open in the analyzer (O)">Open in scope view</button>' : '';
     showTip(tip, mx, my, $('#cv-trend'), trendTipHtml(hit) + `<div class="tip-acts">
       <button data-tip="hide" title="Hide all shots of ${n > 1 ? 'the folders' : 'the folder'} of this point from plots and table for now (Unhide on the folder or Shift+H shows them again)">Hide ${n > 1 ? `these ${n} folders` : 'folder'}</button>
-      <button data-tip="open" title="Open in the analyzer (O)">Open in scope view</button>
-      <button data-tip="reveal" title="Scroll the folder list to this shot">Show in list</button></div>`);
+      ${open}<button data-tip="reveal" title="Scroll the folder list to this shot">Show in list</button></div>` + (ids.length < 2 ? '' : openChoices(hit.rows, 'tip')));
+  }
+  /** Buttons to open one run of a repeat point in the analyzer, or all their switch nodes in one plot. */
+  function openChoices(rows, attr) {
+    const n = Math.min(rows.length, 4);
+    return `<div class="open-choices"><span class="muted">Open in scope view:</span>${rows.map(r =>
+      `<button data-${attr}="open-one" data-id="${r.shot.id}" title="This run with all its channels">${esc(r.batch.name)} <span class="muted">${U.formatSI(r.p.I, 'A', 3)}</span></button>`).join('')}
+      <button data-${attr}="open-all" title="The switch node of ${rows.length > 4 ? 'the first 4' : 'all'} runs as C1..C${n} in one plot, aligned at the 50 % crossing of the selected edge (no current)">All ${n} in one plot</button></div>`;
   }
   function initTrendEvents() {
     const cv = $('#cv-trend'), tip = $('#tip-trend');
@@ -674,10 +700,14 @@ App.dpt.ui = (() => {
       if (same) closeTip(); else lockTip(hit, mx, my);
     });
     tip.addEventListener('click', e => {
-      const a = e.target.dataset.tip, ids = tipLock && tipLock.ids;
+      const b = e.target.closest('[data-tip]'), a = b && b.dataset.tip, ids = tipLock && tipLock.ids;
       if (!a || !ids) return;
-      if (a === 'hide') hideShots(folderShots(ids));
-      else { closeTip(); if (a === 'open') App.dpt.app.openInScope(ids); else revealShot(ids[0]); }
+      if (a === 'hide') { hideShots(folderShots(ids)); return; }
+      closeTip();
+      if (a === 'open') App.dpt.app.openInScope(ids);
+      else if (a === 'open-one') App.dpt.app.openInScope([b.dataset.id]);
+      else if (a === 'open-all') App.dpt.app.openInScope(ids, true);
+      else revealShot(ids[0]);
     });
     document.addEventListener('pointerdown', e => { if (tipLock && !tip.contains(e.target) && e.target !== cv) closeTip(); }, true);
     // the two clicks before it pin and unpin again, so double-click leaves the pins as they were
@@ -966,6 +996,8 @@ App.dpt.ui = (() => {
   }
   const CTX = {
     open: id => App.dpt.app.openInScope([id]),
+    'open-one': (id, ids, b) => App.dpt.app.openInScope([b.dataset.id]),
+    'open-all': (id, ids) => App.dpt.app.openInScope(ids, true),
     'open-pinned': () => App.dpt.app.openInScope([...pinned]),
     pin: id => togglePin(id),
     hide: (id, ids) => hideShots(ids),
@@ -979,7 +1011,8 @@ App.dpt.ui = (() => {
     const m = $('#ctx-menu'), many = pinned.has(id) && pinned.size > 1;
     m.dataset.shot = id; m.dataset.ids = ids.join(' ');
     m.innerHTML = `<div class="ctx-head">${esc(pool.batchOf(sh).name)} / ${esc(sh.label)}${ids.length > 1 ? ` · ${ids.length} repeats` : ''}</div>
-      <button data-ctx="open" title="Open this shot in the analyzer, zoomed to the selected edge (O)">Open in scope view</button>
+      ${ids.length > 1 ? openChoices(ids.map(x => allRows().find(r => r.shot.id === x)).filter(Boolean), 'ctx') :
+      '<button data-ctx="open" title="Open this shot in the analyzer, zoomed to the selected edge (O)">Open in scope view</button>'}
       ${many ? `<button data-ctx="open-pinned">Open all ${pinned.size} pinned shots</button>` : ''}
       <button data-ctx="pin">${pinned.has(id) ? 'Unpin' : 'Pin'}</button>
       <button data-ctx="hide" title="Hide from plots and table for now (H); Unhide all (Shift+H) shows it again">${ids.length > 1 ? `Hide all ${ids.length} repeats` : 'Hide'}</button>
@@ -998,7 +1031,7 @@ App.dpt.ui = (() => {
     m.addEventListener('click', e => {
       const b = e.target.closest('[data-ctx]');
       if (!b) return;
-      closeMenu(); CTX[b.dataset.ctx](m.dataset.shot, m.dataset.ids.split(' '));
+      closeMenu(); CTX[b.dataset.ctx](m.dataset.shot, m.dataset.ids.split(' '), b);
     });
     document.addEventListener('pointerdown', e => { if (menuOpen() && !m.contains(e.target)) closeMenu(); }, true);
     window.addEventListener('keydown', e => { if (menuOpen() && e.key === 'Escape') { e.stopImmediatePropagation(); closeMenu(); } }, true);

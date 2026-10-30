@@ -190,7 +190,11 @@ click to pin it, <kbd>Esc</kbd> to unpin):
   current) and the single values as small dots; *each shot* turns this off. Clicking such a point
   pins all its shots; hovering shows the single values. A clicked point keeps its tooltip open with
   **Hide folder** (hides all shots of the folder(s) of that point for now), **Open in scope view** and
-  **Show in list**; click elsewhere, click the point again or press <kbd>Esc</kbd> to close it. **Double-click** a point to scroll the
+  **Show in list**; click elsewhere, click the point again or press <kbd>Esc</kbd> to close it. For a
+  repeat point it lists the runs instead (folder and current): pick one to open it with all its
+  channels, or **All N in one plot** for the switch node of every run (up to 4) as C1..C4 in one scope
+  view, aligned at the 50 % crossing of the selected edge, without the current. The right-click menu
+  on such a point offers the same. **Double-click** a point to scroll the
   folder list on the left to that shot (its folder opens and the shot flashes), so you can read the
   folder's parameters; the right-click menu has the same as **Show in folder list** for any view.
 - **Table**: every shot with its parameters and metrics; click a header to sort. **Copy** gives
@@ -225,7 +229,13 @@ again), and come back with **Unhide** on the folder, **Unhide all** above the po
 (<kbd>Shift</kbd>+<kbd>H</kbd>) or a reload. **Collapse repeats** above the pool list merges folders
 with identical parameters into one entry (*2 runs*, the folder names under it) with the shots merged
 by name (*S05 ×2*, mean current); its checkbox and Hide act on all of them, Edit and × need the
-single folders (untick it). **Export pool** saves raw data
+single folders (untick it). **Folders only** hides the shot lists and shows one compact entry per
+folder with its current range.
+
+While a **filter** is set, every folder shows how many of its shots still pass (*6/20*, amber when
+only some pass, blue when all do, the folder struck through when none does) and the current range
+of those shots (*Filter: 6 of 20 shots · I 10 A – 43.8 A*), so you can see which folders the
+filter still lets through and why. **Export pool** saves raw data
 and parameters to a `.json` file (drop it onto the page or use **Import pool** on another computer).
 
 **Metrics** (per edge; levels are measured per edge, because the off-state level moves with

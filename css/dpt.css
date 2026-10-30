@@ -21,11 +21,20 @@ code { font: 12px ui-monospace, Consolas, monospace; color: var(--fg); }
 /* ---------- pool column */
 .pool { background: var(--bg-2); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
 #pool-list { flex: 1; overflow-y: auto; padding: 6px; }
-.pool-tools { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--line); color: var(--fg-2); font-size: 11.5px; }
+.pool-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--line); color: var(--fg-2); font-size: 11.5px; }
 .pool-tools label { display: inline-flex; align-items: center; gap: 4px; }
 .pool-tools .spacer { flex: 1; }
 #unhide-all[hidden] { display: none; }
 .batch.repeats { border-style: dashed; }
+#pool-list.folders-only .shot-list { display: none; }
+#pool-list.folders-only .batch > summary::before { visibility: hidden; }
+#pool-list.folders-only .batch-name { white-space: normal; overflow-wrap: anywhere; }
+.batch-match { margin-top: 2px; color: var(--fg); }
+.flt-n { font-size: 10.5px; padding: 0 5px; border-radius: 8px; border: 1px solid var(--line); color: var(--fg-2); font-variant-numeric: tabular-nums; }
+.batch.flt-part .flt-n { border-color: var(--warn); color: var(--warn); }
+.batch.flt-all .flt-n { border-color: var(--accent); color: var(--accent); }
+.batch.flt-none { opacity: .5; }
+.batch.flt-none .batch-name { text-decoration: line-through; }
 .shot .tag { padding: 0 5px; line-height: 15px; font-size: 10.5px; border-radius: 8px; color: var(--fg-2); }
 .batch { background: var(--bg-3); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; }
 .batch > summary { list-style: none; cursor: pointer; padding: 6px 8px; display: flex; align-items: center; gap: 6px; }
@@ -64,6 +73,10 @@ code { font: 12px ui-monospace, Consolas, monospace; color: var(--fg); }
 .plot-tip.locked { pointer-events: auto; border-color: var(--accent); }
 .tip-acts { display: flex; gap: 4px; margin-top: 6px; }
 .tip-acts button { padding: 1px 8px; font-size: 11.5px; }
+.open-choices { display: flex; flex-direction: column; align-items: stretch; gap: 3px; margin-top: 6px; }
+.plot-tip .open-choices button { text-align: left; padding: 1px 8px; font-size: 11.5px; }
+.ctx-menu .open-choices { margin: 0 0 3px; padding-bottom: 3px; border-bottom: 1px solid var(--line); gap: 0; }
+.ctx-menu .open-choices > .muted { padding: 3px 8px 0; font-size: 11.5px; }
 .table-wrap { flex: 1; overflow: auto; min-height: 0; }
 .grid-table { border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; width: max-content; min-width: 100%; }
 .grid-table th { position: sticky; top: 0; background: var(--bg-2); color: var(--fg-2); font-weight: 500; text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--line); cursor: pointer; white-space: nowrap; user-select: none; }

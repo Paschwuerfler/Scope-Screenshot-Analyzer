@@ -151,6 +151,14 @@ try {
   & $setF 'rg = 10'
   $f = Invoke-CdpJs $sess 'JSON.stringify({ rows: document.querySelectorAll("#tbl tbody tr").length, pts: App.dpt.ui.debug().trend.length, struck: document.querySelectorAll(".shot.filtered").length, title: document.getElementById("tbl-title").textContent })' | ConvertFrom-Json
   Check 'Rg=10 filters table, trend and pool list' ($f.rows -eq 20 -and $f.pts -eq 20 -and $f.struck -eq 20 -and $f.title -match '20 of 40') ($f | ConvertTo-Json -Compress)
+  # per folder: shots passing the filter; Folders only hides the shot lists
+  & $setF 'rg = 10 I>10A'
+  Invoke-CdpJs $sess 'document.getElementById("tgl-pool-folders").click(); true' | Out-Null
+  $fo = Invoke-CdpJs $sess 'JSON.stringify({ n: [...document.querySelectorAll(".flt-n")].map(e => e.textContent), cls: [...document.querySelectorAll(".batch")].map(b => b.classList.contains("flt-part") ? "part" : b.classList.contains("flt-none") ? "none" : "?"), lists: [...document.querySelectorAll(".shot-list")].filter(l => l.offsetHeight).length, m: document.querySelector(".batch-match").textContent.startsWith("Filter: 6 of 20 shots") })'
+  Check 'folder filter counts, Folders only' ($fo -eq '{"n":["6/20","0/20"],"cls":["part","none"],"lists":0,"m":true}') $fo
+  Shot $sess 'dpt_folders_only.png'
+  Invoke-CdpJs $sess 'document.getElementById("tgl-pool-folders").click(); true' | Out-Null
+  Check 'shot lists back' ((Invoke-CdpJs $sess '[...document.querySelectorAll(".shot-list")].filter(l => l.offsetHeight).length') -eq 2)
   $mid = Invoke-CdpJs $sess '(() => { const v = App.dpt.pool.rows("fall1").map(r => r.p.I).sort((a, b) => a - b); return v[20]; })()'
   & $setF "Rg=10  I ~ $($mid) A"
   $n = Invoke-CdpJs $sess "App.dpt.pool.rows('fall1').filter(r => r.edge && Math.abs(r.p.I - $mid) <= 0.1 * $mid && r.batch.params.some(p => p.key === 'Rg' && p.value === 10)).length"
@@ -227,6 +235,11 @@ try {
   Send-CdpMouse $sess 'mousePressed' $pt[0] $pt[1]; Send-CdpMouse $sess 'mouseReleased' $pt[0] $pt[1]
   $tip = Invoke-CdpJs $sess 'JSON.stringify({ ids: (App.dpt.ui.debug().tip || []).length, btn: !!document.querySelector("#tip-trend.locked [data-tip=hide]") })'
   Check 'clicked point keeps its tooltip with Hide' ($tip -eq '{"ids":2,"btn":true}') $tip
+  $oc = Invoke-CdpJs $sess 'JSON.stringify({ one: document.querySelectorAll("#tip-trend [data-tip=open-one]").length, all: !!document.querySelector("#tip-trend [data-tip=open-all]") })'
+  Check 'repeat point offers each run + all in one plot' ($oc -eq '{"one":2,"all":true}') $oc
+  # all switch nodes in one doc: C1, C2 = the two runs, no current; equal shots -> identical columns
+  $od = Invoke-CdpJs $sess '(() => { const ids = App.dpt.ui.debug().tip, d = App.dpt.app.overlayDoc(ids.map(id => App.dpt.pool.shots.find(s => s.id === id))), L = d.csv.split("\n"), r = L[Math.floor(L.length / 2)].split(","); return JSON.stringify({ head: L[0], long: L.length > 1000, same: r[1] === r[2], names: Object.keys(d.names).join(), edge: !!d.edge }); })()'
+  Check 'all-in-one doc: switch nodes only, aligned' ($od -eq '{"head":"Time in s,C1 in V,C2 in V","long":true,"same":true,"names":"C1,C2","edge":true}') $od
   Shot $sess 'dpt_point_tip.png'
   Invoke-CdpJs $sess 'document.querySelector("[data-tip=hide]").click(); true' | Out-Null
   $hs = Invoke-CdpJs $sess 'JSON.stringify({ pts: App.dpt.ui.debug().trend.length, hidden: App.dpt.ui.debug().hidden.length, pinned: App.dpt.ui.debug().pinned.length, saved: App.dpt.pool.shots.filter(s => s.hidden).length, tag: document.querySelectorAll("#pool-list .tag").length, unhide: !document.getElementById("unhide-all").hidden })'
