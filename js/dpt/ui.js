@@ -6,7 +6,7 @@ App.dpt.ui = (() => {
   const P = App.dpt.plot, U = App.util, pool = App.dpt.pool;
   const esc = U.escapeHtml;
   const PREFS_KEY = 'dpt-prefs';
-  const prefs = Object.assign({ edge: null, color: 'I', metric: 'slew1090', x: 'I', group: 'Folder', logX: false, sort: null, view: null }, loadPrefs());
+  const prefs = Object.assign({ edge: null, color: 'I', metric: 'slew1090', x: 'I', group: 'Folder', repeats: 'sd', logX: false, filter: '', sort: null, view: null }, loadPrefs());
   let hover = null;              // shot id under the mouse (any view)
   const pinned = new Set();      // shot ids pinned by click
   const collapsed = new Set();   // batch ids collapsed in the pool list
@@ -32,7 +32,8 @@ App.dpt.ui = (() => {
 
   // ---------------------------------------------------------------- data helpers
   const allRows = () => pool.rows(prefs.edge).filter(r => r.edge);
-  const visRows = () => allRows().filter(r => !r.shot.hidden);
+  const shownRows = () => { const f = compileFilter(prefs.filter); return allRows().filter(f.test); };
+  const visRows = () => shownRows().filter(r => !r.shot.hidden);
   const swCol = r => r.shot.cols[r.batch.roles.sw];
   const keyInfo = k => pool.paramKeys().find(x => x.key === k);
   function fmtParam(k, v) {
@@ -58,6 +59,86 @@ App.dpt.ui = (() => {
     return { kind: 'cat', info, cats, of: r => P.CATEGORICAL[cats.indexOf(String(get(r)))] || P.INK.fg2 };
   }
 
+  // ---------------------------------------------------------------- filter
+  /**
+   * Shot filter from text; terms are separated by spaces or ';' and must all match:
+   *   I~10A  around 10 A (±10 %), I~10A±2A or I~10±20% for another tolerance
+   *   I=8..12A (an open end is allowed: I=..5A)   I>5A   I<=2A   RHR=330   VCC!=24   Folder=33045A24
+   *   ~10A  >5A  without a key = shot current I · plain text = folder or shot name contains it
+   * Keys are the parameter names (case-insensitive) plus I, I_edge, Folder, Shot.
+   * Returns { test(row), bad: [terms that could not be read], n: number of terms }.
+   */
+  function compileFilter(text) {
+    const terms = [], bad = [];
+    const src = String(text || '')
+      .replace(/\s*(<=|>=|!=|=|<|>|~|±|\.\.)\s*/g, '$1')
+      .replace(/(\d)\s+(?=[GMkKmuµμnpf]?(?:Ω|Ohm|[A-Za-z]{1,2}|%)(?:[\s;]|$))/g, '$1');   // "10 A" -> "10A"
+    for (const t of src.split(/[\s;]+/).filter(Boolean)) {
+      const m = t.match(/^([^<>=!~]*?)(<=|>=|!=|=|<|>|~)(.*)$/);
+      if (!m) { const q = t.toLowerCase(); terms.push(r => `${r.batch.name} ${r.shot.label}`.toLowerCase().includes(q)); continue; }
+      const f = filterTerm(m[1] || 'I', m[2], m[3]);
+      if (f) terms.push(f); else bad.push(t);
+    }
+    return { test: r => terms.every(f => f(r)), bad, n: terms.length };
+  }
+  function filterTerm(key, op, val) {
+    const norm = k => k.toLowerCase().replace(/[\s_]/g, ''), lk = norm(key);
+    const k = lk === 'shot' ? 'Shot' : (pool.paramKeys().find(x => norm(x.key) === lk) || {}).key;
+    if (!k || val === '') return null;
+    const get = k === 'Shot' ? r => r.shot.label : r => r.p[k];
+    const num = s => pool.param('', s).value;            // number with SI prefix / unit, null if not numeric
+    const isNum = v => typeof v === 'number' && isFinite(v);
+    const onNum = test => r => { const v = get(r); return isNum(v) && test(v); };
+    if (op === '~') {
+      const [c0, t0] = val.split('±'), c = num(c0);
+      if (c === null) return null;
+      let tol = Math.abs(c) * 0.1;
+      if (t0 !== undefined) {
+        const pct = t0.endsWith('%'), t = num(pct ? t0.slice(0, -1) : t0);
+        if (t === null) return null;
+        tol = pct ? Math.abs(c) * t / 100 : Math.abs(t);
+      }
+      return onNum(v => Math.abs(v - c) <= tol);
+    }
+    if (op === '=' || op === '!=') {
+      let f;
+      if (val.includes('..')) {
+        const [a0, b0] = val.split('..'), a = a0 ? num(a0) : -Infinity, b = b0 ? num(b0) : Infinity;
+        if (a === null || b === null) return null;
+        f = onNum(v => v >= Math.min(a, b) && v <= Math.max(a, b));
+      } else {
+        const c = num(val), q = val.toLowerCase();
+        f = r => { const v = get(r); return c !== null && isNum(v) ? Math.abs(v - c) <= 1e-6 * Math.abs(c) : String(v ?? '').toLowerCase() === q; };
+      }
+      return op === '=' ? f : r => !f(r);
+    }
+    const c = num(val);
+    if (c === null) return null;
+    return onNum({ '<': v => v < c, '>': v => v > c, '<=': v => v <= c, '>=': v => v >= c }[op]);
+  }
+  function renderFilter() {
+    const inp = $('#flt'), f = compileFilter(prefs.filter);
+    if (inp.value !== prefs.filter && document.activeElement !== inp) inp.value = prefs.filter;
+    inp.classList.toggle('invalid', f.bad.length > 0);
+    inp.title = f.bad.length ? `Not understood (ignored): ${f.bad.join('  ')}` : inp.dataset.help;
+    $('#flt-clear').hidden = !prefs.filter;
+  }
+  function setFilter(text) {
+    prefs.filter = text; savePrefs();
+    renderFilter(); renderPool(); renderTable(); drawOverlay(); drawTrend();
+  }
+  function initFilter() {
+    const inp = $('#flt'), apply = U.debounce(() => setFilter(inp.value), 150);
+    inp.dataset.help = inp.title;
+    inp.addEventListener('input', apply);
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { e.stopPropagation(); if (inp.value) { inp.value = ''; setFilter(''); } else inp.blur(); }
+      else if (e.key === 'Enter') inp.blur();
+    });
+    $('#flt-clear').addEventListener('click', () => { inp.value = ''; setFilter(''); });
+  }
+  const focusFilter = () => { $('#flt').focus(); $('#flt').select(); };
+
   // ---------------------------------------------------------------- selects
   function fillSelect(sel, opts, value) {
     sel.innerHTML = opts.map(o => `<option value="${esc(o.value)}"${o.value === value ? ' selected' : ''}>${esc(o.label)}</option>`).join('');
@@ -72,6 +153,7 @@ App.dpt.ui = (() => {
     prefs.metric = fillSelect($('#sel-metric'), METRICS.map(m => ({ value: m.key, label: m.label })), prefs.metric);
     prefs.x = fillSelect($('#sel-x'), keys.filter(k => k.numeric).map(k => ({ value: k.key, label: k.label })), prefs.x);
     prefs.group = fillSelect($('#sel-group'), [{ value: '', label: 'none' }, ...keys.filter(k => k.key !== prefs.x).map(k => ({ value: k.key, label: k.label }))], prefs.group);
+    $('#sel-repeats').value = prefs.repeats;
     $('#tgl-logx').classList.toggle('on', !!prefs.logX);
   }
   function onSelect(id, key) {
@@ -80,7 +162,7 @@ App.dpt.ui = (() => {
 
   // ---------------------------------------------------------------- pool list
   function renderPool() {
-    const col = colorizer(), byShot = new Map(allRows().map(r => [r.shot.id, r]));
+    const col = colorizer(), byShot = new Map(allRows().map(r => [r.shot.id, r])), flt = compileFilter(prefs.filter);
     const n = pool.shots.length;
     $('#pool-count').textContent = n ? `${pool.batches.length} folder${pool.batches.length > 1 ? 's' : ''} · ${n} shots` : '';
     $('#pool-list').innerHTML = pool.batches.map(b => {
@@ -93,7 +175,8 @@ App.dpt.ui = (() => {
         <div class="batch-params">${params || '<i>no parameters</i>'} · ${esc(b.roles.sw)} switch node, ${esc(b.roles.cur || 'no')} current</div>
         <ul class="shot-list">${sh.map(s => {
           const r = byShot.get(s.id), warn = shotWarnings(s, r && r.edge);
-          return `<li class="shot${s.hidden ? ' off' : ''}" data-shot="${s.id}">
+          const out = r && flt.n && !flt.test(r);
+          return `<li class="shot${s.hidden ? ' off' : ''}${out ? ' filtered' : ''}" data-shot="${s.id}"${out ? ' title="Hidden by the filter"' : ''}>
             <input type="checkbox" data-sact="toggle"${s.hidden ? '' : ' checked'} title="Show in plots and table">
             <span class="swatch" style="background:${r ? col.of(r) : 'transparent'}"></span>
             <span class="shot-label">${esc(s.label)}</span>
@@ -331,6 +414,30 @@ App.dpt.ui = (() => {
     for (const r of allRows()) { const v = fmtParam(g, r.p[g]); if (!cats.includes(v)) cats.push(v); }
     return { of: r => cats.indexOf(fmtParam(g, r.p[g])), cats };
   }
+  /**
+   * Trend points. With prefs.repeats on, shots with the same shot name, folder parameters and group
+   * (e.g. one setup measured three times in separate folders) merge into one point at the mean of x
+   * and y; xe / ye are the error bar ends (± sample σ or min–max). Each point keeps its member rows.
+   */
+  function trendPoints(rows, xk, yOf, gi) {
+    const keys = pool.paramKeys().filter(k => !k.builtin).map(k => k.key), sets = new Map();
+    for (const r of rows) {
+      const id = prefs.repeats === 'off' ? r.shot.id : JSON.stringify([gi.of(r), r.shot.label, ...keys.map(k => r.p[k])]);
+      if (!sets.has(id)) sets.set(id, []);
+      sets.get(id).push(r);
+    }
+    const mean = a => a.reduce((s, v) => s + v, 0) / a.length;
+    const bar = a => {
+      if (a.length < 2) return null;
+      if (prefs.repeats === 'range') return [Math.min(...a), Math.max(...a)];
+      const mu = mean(a), sd = Math.sqrt(a.reduce((s, v) => s + (v - mu) ** 2, 0) / (a.length - 1));
+      return [mu - sd, mu + sd];
+    };
+    return [...sets.values()].map(list => {
+      const xs = list.map(r => r.p[xk]), ys = list.map(yOf);
+      return { rows: list, g: gi.of(list[0]), x: mean(xs), y: mean(ys), xs, ys, xe: bar(xs), ye: bar(ys) };
+    });
+  }
   function drawTrend() {
     const cv = $('#cv-trend'), { ctx, w, h } = P.fit(cv);
     ctx.fillStyle = P.INK.bg; ctx.fillRect(0, 0, w, h);
@@ -341,7 +448,8 @@ App.dpt.ui = (() => {
     const logX = prefs.logX && rows.every(r => r.p[xk] > 0);
     const ru = m.rate ? rateUnit(Math.max(...rows.map(r => Math.abs(r.edge[m.key])))) : null;
     const yOf = r => r.edge[m.key] * (ru ? ru.mult : 1);
-    const ys = rows.map(yOf), xs = rows.map(r => r.p[xk]);
+    const gi = groupInfo(), em = emphasis(), pts = trendPoints(rows, xk, yOf, gi);
+    const ys = [...pts.map(p => p.y), ...pts.flatMap(p => p.ye || [])], xs = [...pts.map(p => p.x), ...pts.flatMap(p => p.xe || [])].filter(v => !logX || v > 0);
     let [y0, y1] = P.extent(ys, 0.08);
     if (m.zero) { y0 = Math.min(0, y0); }
     const A = P.area(w, h);
@@ -353,24 +461,32 @@ App.dpt.ui = (() => {
     const sy = P.scale(y0, y1, A.y + A.h, A.y);
     P.axes(ctx, A, sx, sy, { xUnit: xi.unit, yUnit: ru ? '' : m.unit === '%' ? '' : m.unit, xTitle: xi.label, yTitle: `${m.label} · ${EDGE_LABEL(prefs.edge).toLowerCase()}${ru ? ` (${ru.u})` : m.unit === '%' ? ' (%)' : ''}` });
     P.clip(ctx, A);
-    const gi = groupInfo(), em = emphasis();
     const groups = new Map();
-    for (const r of rows) { const g = gi.of(r); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(r); }
+    for (const p of pts) { if (!groups.has(p.g)) groups.set(p.g, []); groups.get(p.g).push(p); }
     for (const [g, list] of groups) {
-      list.sort((a, b) => a.p[xk] - b.p[xk]);
+      list.sort((a, b) => a.x - b.x);
       const color = P.CATEGORICAL[g] || P.INK.fg2, shape = P.MARKERS[g] || 'circle';
       ctx.globalAlpha = em ? 0.45 : 1;
       ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.beginPath();
-      list.forEach((r, k) => { const X = sx(r.p[xk]), Y = sy(yOf(r)); if (k) ctx.lineTo(X, Y); else ctx.moveTo(X, Y); });
+      list.forEach((p, k) => { const X = sx(p.x), Y = sy(p.y); if (k) ctx.lineTo(X, Y); else ctx.moveTo(X, Y); });
       ctx.stroke();
-      for (const r of list) {
-        const X = sx(r.p[xk]), Y = sy(yOf(r)), hi = isHi(r.shot.id);
+      for (const p of list) {
+        const X = sx(p.x), Y = sy(p.y), hi = p.rows.some(r => isHi(r.shot.id));
         ctx.globalAlpha = em && !hi ? 0.45 : 1;
+        if (p.rows.length > 1) {
+          // single measurements as small dots behind the error bars (y only: their x spread is the horizontal bar)
+          ctx.fillStyle = color;
+          for (const v of p.ys) { ctx.beginPath(); ctx.arc(X, sy(v), 1.8, 0, Math.PI * 2); ctx.fill(); }
+          ctx.strokeStyle = hi ? P.INK.fg : color; ctx.lineWidth = 1.5; ctx.beginPath();
+          if (p.ye) { const a = sy(p.ye[0]), b = sy(p.ye[1]); ctx.moveTo(X, a); ctx.lineTo(X, b); ctx.moveTo(X - 4, a); ctx.lineTo(X + 4, a); ctx.moveTo(X - 4, b); ctx.lineTo(X + 4, b); }
+          if (p.xe && (!logX || p.xe[0] > 0)) { const a = sx(p.xe[0]), b = sx(p.xe[1]); ctx.moveTo(a, Y); ctx.lineTo(b, Y); ctx.moveTo(a, Y - 3); ctx.lineTo(a, Y + 3); ctx.moveTo(b, Y - 3); ctx.lineTo(b, Y + 3); }
+          ctx.stroke();
+        }
         P.marker(ctx, shape, X, Y, hi ? 6 : 4);
         ctx.fillStyle = color; ctx.fill();
         ctx.lineWidth = 2; ctx.strokeStyle = hi ? P.INK.fg : P.INK.bg; ctx.stroke();
-        if (r.edge.warn.length || r.shot.res.warn.length) { ctx.fillStyle = '#fbbf24'; ctx.fillRect(X + 4, Y - 9, 3, 3); }
-        tr.pts.push({ r, X, Y, y: yOf(r) });
+        if (p.rows.some(r => r.edge.warn.length || r.shot.res.warn.length)) { ctx.fillStyle = '#fbbf24'; ctx.fillRect(X + 4, Y - 9, 3, 3); }
+        tr.pts.push({ r: p.rows[0], rows: p.rows, pt: p, X, Y, y: p.y });
       }
     }
     ctx.globalAlpha = 1;
@@ -386,7 +502,7 @@ App.dpt.ui = (() => {
       });
       ctx.restore();
     }
-    tr.unit = ru ? ru.u : m.unit;
+    tr.unit = ru ? ru.u : m.unit; tr.mult = ru ? ru.mult : 1;
   }
   function trendHit(mx, my) {
     let best = null, bd = 14;
@@ -399,14 +515,29 @@ App.dpt.ui = (() => {
       const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, hit = trendHit(mx, my);
       setHover(hit ? hit.r.shot.id : null);
       if (!hit) { tip.style.display = 'none'; return; }
-      const m = metric(prefs.metric), warn = [...hit.r.shot.res.warn, ...hit.r.edge.warn];
+      const m = metric(prefs.metric), warn = hit.rows.flatMap(r => [...r.shot.res.warn, ...r.edge.warn]);
+      if (hit.rows.length > 1) {
+        // p.y / ys / ye are in plot units (rate metrics scaled by tr.mult); fmtMetric wants SI
+        const p = hit.pt, fy = v => esc(fmtMetric(m, v / tr.mult)), spread = prefs.repeats === 'range' ? 'min–max' : '± σ';
+        showTip(tip, mx, my, cv, `<b>${hit.rows.length} repeats of ${esc(hit.r.shot.label)}</b> (${hit.rows.map(r => esc(r.batch.name)).join(', ')})<br>` +
+          `${esc(keyInfo(prefs.x).label)} = ${esc(fmtParam(prefs.x, p.x))} (${p.xs.map(v => esc(fmtParam(prefs.x, v))).join(', ')})<br>` +
+          `${esc(m.label)} = ${fy(p.y)}, ${spread}: ${fy(p.ye[0])} … ${fy(p.ye[1])}<br>` +
+          `<span class="muted">single: ${p.ys.map(fy).join(', ')}</span>` +
+          (warn.length ? `<br><span style="color:var(--warn)">! ${esc(warn.join('; '))}</span>` : ''));
+        return;
+      }
       showTip(tip, mx, my, cv, `<b>${esc(hit.r.batch.name)} / ${esc(hit.r.shot.label)}</b><br>` +
         `${esc(keyInfo(prefs.x).label)} = ${esc(fmtParam(prefs.x, hit.r.p[prefs.x]))}<br>${esc(m.label)} = ${esc(fmtMetric(m, hit.r.edge[m.key]))}` +
         (prefs.group ? `<br>${esc(prefs.group)} = ${esc(fmtParam(prefs.group, hit.r.p[prefs.group]))}` : '') +
         (warn.length ? `<br><span style="color:var(--warn)">! ${esc(warn.join('; '))}</span>` : ''));
     });
     cv.addEventListener('pointerleave', () => { tip.style.display = 'none'; setHover(null); });
-    cv.addEventListener('click', e => { const r = cv.getBoundingClientRect(), hit = trendHit(e.clientX - r.left, e.clientY - r.top); if (hit) togglePin(hit.r.shot.id); });
+    cv.addEventListener('click', e => { const b = cv.getBoundingClientRect(), hit = trendHit(e.clientX - b.left, e.clientY - b.top); if (!hit) return;
+      // a repeat point pins / unpins all its shots together
+      const on = !hit.rows.every(r => pinned.has(r.shot.id));
+      for (const r of hit.rows) if (on) pinned.add(r.shot.id); else pinned.delete(r.shot.id);
+      syncHighlight();
+    });
   }
 
   // ---------------------------------------------------------------- table
@@ -424,7 +555,7 @@ App.dpt.ui = (() => {
     ];
   }
   function sortedRows() {
-    const rows = allRows(), s = prefs.sort;
+    const rows = shownRows(), s = prefs.sort;
     if (!s) return rows;
     const c = columns().find(x => x.key === s.key);
     if (!c) return rows;
@@ -437,7 +568,8 @@ App.dpt.ui = (() => {
   }
   function renderTable() {
     const cols = columns(), rows = sortedRows(), s = prefs.sort;
-    $('#tbl-title').textContent = prefs.edge ? `${EDGE_LABEL(prefs.edge)} · ${rows.length} shots` : 'Edges';
+    const total = allRows().length;
+    $('#tbl-title').textContent = prefs.edge ? `${EDGE_LABEL(prefs.edge)} · ${rows.length < total ? `${rows.length} of ${total}` : rows.length} shots` : 'Edges';
     $('#tbl').className = 'grid-table';
     $('#tbl').innerHTML = `<thead><tr>${cols.map(c => `<th data-col="${esc(c.key)}" class="${c.txt ? 'txt' : ''}${s && s.key === c.key ? ' sorted' + (s.desc ? ' desc' : '') : ''}" title="Sort">${esc(c.label)}</th>`).join('')}</tr></thead>
       <tbody>${rows.map(r => `<tr data-row="${r.shot.id}" class="${r.shot.hidden ? 'off' : ''}">${cols.map(c => {
@@ -543,6 +675,10 @@ App.dpt.ui = (() => {
       async function commit() {
         const name = $('#bd-name').value.trim() || b0.name;
         const ps = params.filter(p => p.key.trim()).map(p => pool.param(p.key, p.text));
+        // parameters no other folder has yet (in edit mode: and this folder did not have before)
+        const others = pool.batches.filter(b => b.id !== b0.id);
+        const fresh = others.length ? ps.filter(p => !others.some(b => b.params.some(q => q.key === p.key)) &&
+          !(edit && b0.params.some(q => q.key === p.key))) : [];
         if (edit) {
           await pool.updateBatch(b0.id, { name, params: ps, roles: Object.assign({}, roles) });
           for (const s of shots) if (over.get(s.id) !== s.current) await pool.updateShots(s.id, { current: over.get(s.id) });
@@ -551,12 +687,41 @@ App.dpt.ui = (() => {
           for (const s of shots) s.current = over.get(s.id);
           await pool.addDraft(draft);
         }
+        if (fresh.length) {
+          const vals = await askDefaults(fresh, others.length);
+          for (const p of fresh) if (vals[p.key]) await pool.fillParam(p.key, vals[p.key], p.unit);
+        }
         close(true);
       }
       dlg.addEventListener('input', onInput); dlg.addEventListener('change', onChange); dlg.addEventListener('click', onClick);
       dlg.addEventListener('cancel', onCancel);
       dlg.showModal();
       if (!edit) setTimeout(() => { const first = dlg.querySelector('#bd-params input[data-f="text"]') || $('#bd-name'); first.focus(); first.select && first.select(); }, 0);
+    });
+  }
+
+  /**
+   * Ask for the value that folders already in the pool get for parameters that are new.
+   * Resolves { key: text } (empty text = leave those folders without it). Enter fills in, Esc skips.
+   */
+  function askDefaults(params, n) {
+    const dlg = $('#newparam-dlg');
+    $('#np-text').textContent = `${n} folder${n === 1 ? '' : 's'} already in the pool ${n === 1 ? 'has' : 'have'} no value for ` +
+      `${params.length === 1 ? 'this parameter' : 'these parameters'}. Value for ${n === 1 ? 'it' : 'them'} (leave empty to skip):`;
+    $('#np-params').innerHTML = params.map(p => `<tr><td>${esc(p.key)}</td><td><input data-key="${esc(p.key)}" placeholder="${esc(p.text)}"></td></tr>`).join('');
+    return new Promise(resolve => {
+      const done = ok => {
+        dlg.removeEventListener('click', onClick); dlg.removeEventListener('keydown', onKey); dlg.removeEventListener('cancel', onCancel);
+        const out = {};
+        if (ok) for (const i of dlg.querySelectorAll('#np-params input')) out[i.dataset.key] = i.value.trim();
+        dlg.close(); resolve(out);
+      };
+      const onClick = e => { if (e.target.dataset.np) done(e.target.dataset.np === 'ok'); };
+      const onKey = e => { if (e.key === 'Enter') { e.preventDefault(); done(true); } };
+      const onCancel = e => { e.preventDefault(); done(false); };
+      dlg.addEventListener('click', onClick); dlg.addEventListener('keydown', onKey); dlg.addEventListener('cancel', onCancel);
+      dlg.showModal();
+      dlg.querySelector('#np-params input').focus();
     });
   }
 
@@ -641,7 +806,7 @@ App.dpt.ui = (() => {
   function renderAll() {
     document.body.classList.toggle('empty', !pool.shots.length);
     for (const id of [...pinned]) if (!pool.shots.some(s => s.id === id)) pinned.delete(id);
-    renderSelects(); renderPool(); renderTable(); renderSettings();
+    renderSelects(); renderFilter(); renderPool(); renderTable(); renderSettings();
     drawOverlay(); drawTrend();
     const ws = pool.shots.filter(s => s.res && (s.res.warn.length || !s.res.edges.length)).length;
     $('#status').textContent = pool.shots.length ? `${pool.shots.length} shots in ${pool.batches.length} folder(s)${ws ? ` · ${ws} with warnings` : ''}` : 'Pool is empty';
@@ -657,9 +822,9 @@ App.dpt.ui = (() => {
   function init() {
     if (prefs.settings) pool.setSettings(prefs.settings);
     onSelect('#sel-edge', 'edge'); onSelect('#sel-color', 'color'); onSelect('#sel-metric', 'metric');
-    onSelect('#sel-x', 'x'); onSelect('#sel-group', 'group');
+    onSelect('#sel-x', 'x'); onSelect('#sel-group', 'group'); onSelect('#sel-repeats', 'repeats');
     $('#tgl-logx').addEventListener('click', () => { prefs.logX = !prefs.logX; savePrefs(); renderSelects(); drawTrend(); });
-    initPoolEvents(); initOverlayEvents(); initTrendEvents(); initTableEvents(); initSettings(); initMenu();
+    initPoolEvents(); initOverlayEvents(); initTrendEvents(); initTableEvents(); initSettings(); initMenu(); initFilter();
     App.events.on('pool-changed', renderAll);
     App.events.on('toast', toast);
     new ResizeObserver(U.debounce(() => { drawOverlay(); drawTrend(); }, 50)).observe($('.plots'));
@@ -668,5 +833,5 @@ App.dpt.ui = (() => {
   /** For tools/dpt_ui_test.ps1: hover / pin state and the trend points as drawn (CSS px in #cv-trend). */
   const debug = () => ({ hover, pinned: [...pinned], trend: tr.pts.map(p => ({ id: p.r.shot.id, X: p.X, Y: p.Y, y: p.y })) });
 
-  return { init, prefs, debug, renderAll, toast, openBatchDialog, tableText, fitOverlay, zoomOverlay, panOverlay, cycleEdge, unpinAll, togglePin, keyShots, overlayWindow, METRICS };
+  return { init, prefs, debug, renderAll, toast, openBatchDialog, tableText, fitOverlay, zoomOverlay, panOverlay, cycleEdge, unpinAll, togglePin, keyShots, overlayWindow, focusFilter, compileFilter, METRICS };
 })();

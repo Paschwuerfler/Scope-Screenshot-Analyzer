@@ -25,7 +25,7 @@ new measurement, time-series import, UI controls). User guide: [README.md](READM
   `App.util.formatSI / formatRange / formatRate`. Parse user input with `App.util.parseSI`.
 - Persisted doc fields are listed in `PERSISTED` in `js/state.js`. If you add a field that
   must survive reloads, add it there. Runtime caches (bitmap, imgData, traces, view) must not be.
-- After changing a doc, call `App.docs.touch(doc, what)` (`'cursors'` | `'calib'` | `'detect'`)
+- After changing a doc, call `App.docs.touch(doc, what)` (`'cursors'` | `'calib'` | `'detect'` | `'notes'` = save only)
   so that it is re-rendered, re-extracted if needed, and saved. Don't write to IndexedDB directly.
 
 ## Where to change what
@@ -34,7 +34,7 @@ new measurement, time-series import, UI controls). User guide: [README.md](READM
 | Button placement, toolbar, panel layout | `index.html` (markup), `css/app.css` (grid: header / strip / stage / panel; widths `--strip-w`, `--panel-w`; rows below 3:2 aspect, `--panel-h`). The stage/panel splitter (`initSplitter` in `js/ui.js`) overrides `--panel-w/-h` and stores them in `App.ui.prefs` |
 | Keyboard shortcuts | `KEYS` in `js/app.js` + help table in `index.html` |
 | Cursor look, dragging, hit areas, zoom/pan, pick modes | `js/view.js` |
-| Readout table / calibration form / thumbnails / status bar | `js/ui.js` |
+| Readout table / calibration form / notes card / thumbnails / status bar | `js/ui.js` |
 | Cursor maths, future auto-measurements (slew 20–80 %, overshoot, ringing) | `js/measure.js` |
 | Trace extraction from pixels | `js/traces.js` |
 | Scope layout detection / OCR regions | `js/layouts/<scope>.js`, registry `js/layouts/index.js` |

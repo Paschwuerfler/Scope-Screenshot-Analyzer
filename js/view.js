@@ -232,7 +232,7 @@ App.view = (() => {
       [`${App.calib.chLabel(d, h.id)} · ${App.util.formatSI(cc.vdiv, cc.unit, 3)}/div`, font(12, true), App.calib.channelById(h.id).color],
       ['Scroll to change vertical scale', font(12), '#f3f4f6'],
       ['Drag to move (Shift: no snapping)', font(12), '#b8c0cc'],
-      ...(d.parts ? [['Ctrl+drag the curve to shift it in time', font(12), '#b8c0cc']] : []),
+      ...(d.parts && d.series.cols.some(c => c.id === h.id && c.part) ? [['Ctrl+drag the curve to shift it in time', font(12), '#b8c0cc']] : []),
     ];
     const w = Math.max(...lines.map(([t, fnt]) => { ctx.font = fnt; return ctx.measureText(t).width; })) + 16 * f, lh = 17 * f, H = lines.length * lh + 10 * f;
     const x = x0 + 8, y = App.util.clamp(h.y - H / 2, y0 + 2, y1 - H - 2);
@@ -450,14 +450,15 @@ App.view = (() => {
 
   /**
    * Merged views: index of the recording (part) whose curve passes near screen point, or -1.
-   * Checks the value range over ±3 px so steep edges count too.
+   * Checks the value range over ±3 px so steep edges count too. The first recording is the time
+   * reference and cannot be dragged.
    */
   function hitCurve(d, v, sx, sy) {
     if (!v.series || !d.parts) return -1;
     let best = -1, bd = HIT_PX + 4;
     for (const col of d.series.cols) {
       const cc = d.calib.channels[col.id];
-      if (!cc || !cc.on) continue;
+      if (!cc || !cc.on || !col.part) continue;
       let lo = Infinity, hi = -Infinity;
       for (let k = -3; k <= 3; k++) {
         const val = App.series.valueAt(d.series, col.id, (sx + k - v.ox) / v.kx);

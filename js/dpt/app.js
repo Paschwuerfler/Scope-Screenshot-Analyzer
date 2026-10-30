@@ -84,16 +84,30 @@ App.dpt.app = (() => {
     return lines.join('\n');
   }
 
+  /**
+   * Name and notes of a shot in the analyzer: values only in the name, values first so they stay
+   * visible in the thumbnail ("S20 · 10 Ω · 24 V · 32.4 A (NOR45A24_Rg10_24V)"); keys in the notes.
+   */
+  function scopeLabel(sh) {
+    const b = pool.batchOf(sh), fmt = p => p.value !== null ? App.util.formatSI(p.value, p.unit, 4) : p.text;
+    const params = b.params.filter(p => p.key), I = pool.shotCurrent(sh);
+    const Itext = I === null || I === undefined ? '–' : App.util.formatSI(I, 'A', 3) + (sh.current !== null && sh.current !== undefined ? ' (entered)' : '');
+    return {
+      name: [sh.label, ...params.map(fmt), Itext].join(' · ') + ` (${b.name})`,
+      notes: [`DPT shot ${sh.label} · folder ${b.name}`, ...params.map(p => `${p.key} = ${fmt(p)}`), `I shot = ${Itext}`].join('\n'),
+    };
+  }
+
   /** One analyzer doc per shot (per file if its channels differ in sampling), with the selected edge to zoom to. */
   function scopeDocs(sh) {
-    const b = pool.batchOf(sh), name = `${b.name} / ${sh.label}`, ek = ui.prefs.edge;
+    const { name, notes } = scopeLabel(sh), ek = ui.prefs.edge;
     const e = sh.res && (sh.res.edges.find(x => x.kind + x.n === ek) || (!ek && sh.res.edges[0]));
     const w = ui.overlayWindow();
     const edge = e ? { t1: e.t10 ?? e.t50, t2: e.t90 ?? e.t50, a: e.t50 + w.a, b: e.t50 + w.b } : null;
     const names = Object.fromEntries(Object.entries(sh.cols).map(([id, c]) => [id, c.name]));
     const csv = shotCsv(sh);
-    if (csv) return [{ name, csv, names, edge }];
-    return sh.files.map(f => ({ name: `${name} · ${f.name}`, csv: f.text, names: {}, edge }));
+    if (csv) return [{ name, notes, csv, names, edge }];
+    return sh.files.map(f => ({ name: `${name} · ${f.name}`, notes, csv: f.text, names: {}, edge }));
   }
 
   function openInScope(ids) {
@@ -138,6 +152,7 @@ App.dpt.app = (() => {
     f: () => ui.fitOverlay(),
     l: () => $('#tgl-logx').click(),
     c: copyTable,
+    '/': () => ui.focusFilter(),
     o: () => openInScope(ui.keyShots()),
     '+': () => ui.zoomOverlay(0.8), '=': () => ui.zoomOverlay(0.8), '-': () => ui.zoomOverlay(1.25),
     ArrowLeft: () => ui.panOverlay(-0.1), ArrowRight: () => ui.panOverlay(0.1),
@@ -181,5 +196,5 @@ App.dpt.app = (() => {
   }
 
   init();
-  return { addFiles, byFolder, openInScope, shotCsv };
+  return { addFiles, byFolder, openInScope, shotCsv, scopeLabel };
 })();

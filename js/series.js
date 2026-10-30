@@ -355,6 +355,34 @@ App.series = (() => {
     }
     ctx.stroke();
   }
+  /**
+   * How well curves colsA around time ta have the same shape as curves colsB around tb (i.e. after
+   * moving B by ta − tb): best Pearson correlation over all column pairs, sampled at 64 points over
+   * ±w (scale and offset do not matter). -> -1..1, or null where they have too little data there.
+   */
+  function shapeMatch(s, colsA, ta, colsB, tb, w) {
+    const N = 64;
+    const grab = (col, t0) => Array.from({ length: N }, (_, i) => {
+      const v = valueAt(s, col.id, (t0 - w + 2 * w * i / (N - 1) - s.t0) / s.dt);
+      return v === null ? NaN : v;
+    });
+    let best = null;
+    for (const ca of colsA) {
+      const x = grab(ca, ta);
+      for (const cb of colsB) {
+        const y = grab(cb, tb), k = x.map((_, i) => i).filter(i => isFinite(x[i]) && isFinite(y[i]));
+        if (k.length < N / 4) continue;
+        const mx = k.reduce((a, i) => a + x[i], 0) / k.length, my = k.reduce((a, i) => a + y[i], 0) / k.length;
+        let sxy = 0, sxx = 0, syy = 0;
+        for (const i of k) { const dx = x[i] - mx, dy = y[i] - my; sxy += dx * dy; sxx += dx * dx; syy += dy * dy; }
+        if (!(sxx > 0 && syy > 0)) continue;
+        const r = sxy / Math.sqrt(sxx * syy);
+        if (best === null || r > best) best = r;
+      }
+    }
+    return best;
+  }
+
   /** strokeColumn for a column of series s, with sxOf mapping the virtual sample index (merged views). */
   function strokeSeries(ctx, s, col, xa, xb, sxOf, syOf, pxWidth) {
     if (!col.dt) return strokeColumn(ctx, col, xa, xb, sxOf, syOf, pxWidth);
@@ -381,5 +409,5 @@ App.series = (() => {
     return new Promise(res => cv.toBlob(b => res(URL.createObjectURL(b))));
   }
 
-  return { VH, isSeriesFile, readText, parse, load, pack, packedEnc, isPrecisionNote, autoNames, autoCalib, axisChannel, setScale, gridDiv, rateText, valueAt, colIndex, combine, strokeColumn, strokeSeries, thumbnail };
+  return { VH, isSeriesFile, readText, parse, load, pack, packedEnc, isPrecisionNote, autoNames, autoCalib, axisChannel, setScale, gridDiv, rateText, valueAt, colIndex, combine, shapeMatch, strokeColumn, strokeSeries, thumbnail };
 })();

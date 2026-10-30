@@ -131,6 +131,12 @@ App.dpt.pool = (() => {
     if (patch.roles) for (const sh of shots) if (sh.batchId === id) analyzeShot(sh, b.roles);
     App.events.emit('pool-changed');
   }
+  /** Give every batch without parameter `key` the value `text` (default for folders added before the parameter existed). */
+  async function fillParam(key, text, unit = '') {
+    const list = batches.filter(b => !b.params.some(p => p.key === key));
+    for (const b of list) { b.params.push(param(key, text, unit)); await putBatch(b); }
+    if (list.length) App.events.emit('pool-changed');
+  }
   async function removeBatch(id) {
     const gone = shots.filter(s => s.batchId === id);
     batches = batches.filter(b => b.id !== id); shots = shots.filter(s => s.batchId !== id);
@@ -227,7 +233,7 @@ App.dpt.pool = (() => {
 
   return {
     get batches() { return batches; }, get shots() { return shots; }, get settings() { return settings; },
-    restore, draft, analyzeDraft, addDraft, updateBatch, removeBatch, updateShots, clear, setSettings,
+    restore, draft, analyzeDraft, addDraft, updateBatch, fillParam, removeBatch, updateShots, clear, setSettings,
     param, guessParams, shotCurrent, paramKeys, edgeKeys, rows, exportJson, importJson, batchOf,
   };
 })();

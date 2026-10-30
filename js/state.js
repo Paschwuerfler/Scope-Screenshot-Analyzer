@@ -8,6 +8,7 @@
 //     axisCh,                           // series: channel labelling the y axis (App.series.axisChannel)
 //     cursors: { x1, x2, sel, periods }, // cursor x positions in image px, sel = 1|2 (keyboard target),
 //                                       // periods = multi-period mode {p0, x1} or null (js/measure.js)
+//     userNotes,                        // free text typed by the user (Notes card), '' if none
 //     parts }                           // merged views only (blob = null): [{ name, blob, shift, map }],
 //                                       // see addMerged / App.series.combine
 // and runtime-only fields (rebuilt on load, never saved):
@@ -55,7 +56,7 @@ App.store = (() => {
 })();
 
 App.docs = (() => {
-  const PERSISTED = ['id', 'name', 'kind', 'blob', 'width', 'height', 'addedAt', 'layoutId', 'layoutName', 'calib', 'status', 'notes', 'raw', 'chNames', 'axisCh', 'cursors', 'parts'];
+  const PERSISTED = ['id', 'name', 'kind', 'blob', 'width', 'height', 'addedAt', 'layoutId', 'layoutName', 'calib', 'status', 'notes', 'raw', 'chNames', 'axisCh', 'cursors', 'parts', 'userNotes'];
   const docs = [];
   let activeId = null;
   let persistenceOk = true;
@@ -289,7 +290,7 @@ App.docs = (() => {
 
   /**
    * Notify that a doc changed. `what` hints what to recompute:
-   *   'cursors' -> just re-render; 'calib' -> re-extract traces; 'detect' -> full re-analysis.
+   *   'cursors' -> just re-render; 'notes' -> only save; 'calib' -> re-extract traces; 'detect' -> full re-analysis.
    */
   function touch(doc, what = 'cursors') {
     if (what === 'detect') { analyze(doc); retrace(doc); }

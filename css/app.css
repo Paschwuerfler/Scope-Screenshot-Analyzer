@@ -123,6 +123,8 @@ body.busy #view { opacity: .6; }
 .probe { font-size: 11px; font-weight: 700; padding: 0 7px; line-height: 17px; border-radius: 9px; border: 1.5px solid var(--c); background: transparent; color: var(--c); }
 .probe.on { background: var(--c); color: #0b0d10; }
 .probe:hover { border-color: var(--c); filter: brightness(1.15); }
+#doc-notes { width: 100%; resize: vertical; min-height: 60px; font: 12px/1.45 ui-monospace, Consolas, monospace; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 5px 7px; }
+#doc-notes:focus { outline: none; border-color: var(--accent); }
 .card h3 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--fg-2); }
 .tip { font-size: 11.5px; margin: 8px 0 0; }
 
@@ -175,7 +177,7 @@ button.undo { border-color: var(--accent); color: var(--accent); }
 .series-ch input[data-chname] { min-width: 4.5em; }
 /* merged views: one row per recording (channels, name, time shift, Align) */
 .recordings { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
-.rec-head { display: flex; justify-content: space-between; color: var(--fg-2); font-size: 11.5px; margin-bottom: 4px; padding-right: 52px; }
+.rec-head { display: flex; align-items: center; gap: 6px; color: var(--fg-2); font-size: 11.5px; margin-bottom: 6px; min-width: 0; }
 .rec-row { display: grid; grid-template-columns: auto minmax(0, 1fr) 88px auto; align-items: center; gap: 6px; margin-bottom: 4px; }
 .rec-chips { display: flex; gap: 2px; }
 .rec-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

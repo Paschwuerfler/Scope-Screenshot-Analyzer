@@ -124,8 +124,8 @@ App.loaders = (() => {
   }
 
   // ---- shots sent from the DPT page (dpt.html opens this page as a named tab, see js/dpt/app.js)
-  // msg = { type: 'scope-open', id, docs: [{ name, csv, names: { C1: header name }, edge: { t1, t2, a, b } | null }] }
-  // A shot already in the session (same name) is reused; edge times are absolute (s):
+  // msg = { type: 'scope-open', id, docs: [{ name, notes, csv, names: { C1: header name }, edge: { t1, t2, a, b } | null }] }
+  // A shot already in the session (same name) is reused, its notes kept; new ones start with `notes`; edge times are absolute (s):
   // cursors go to t1 / t2 (10 / 90 % crossings), the time window to a..b.
   const handled = new Set();
   async function openHandoff(msg) {
@@ -136,6 +136,7 @@ App.loaders = (() => {
         doc = await App.docs.addSeries(new File([it.csv], it.name + '.csv', { type: 'text/csv' }), it.name);
         const named = App.series.autoNames({ cols: Object.entries(it.names || {}).map(([id, name]) => ({ id, name })) });
         for (const id in named) if (doc.series.cols.some(c => c.id === id)) doc.chNames[id] = named[id];
+        if (it.notes) doc.userNotes = String(it.notes);
       }
       if (it.edge) {
         const s = doc.series, x = t => (t - s.t0) / s.dt;

@@ -191,6 +191,9 @@ App.ui = (() => {
         if (Object.keys(map).length) { parts.push({ name: p.name, blob: p.blob, shift: p.shift || 0, map }); data.push(pd); }
       }
     }
+    // the first recording is the time reference: its shift is 0, the others' shifts are offsets against it
+    const ref = parts[0].shift;
+    parts.forEach(p => { p.shift -= ref; });
     for (const r of rows.filter(x => x.use)) {
       const cc = r.d.calib.channels[r.id];
       chNames[r.slot] = r.name.trim() === r.slot ? '' : r.name.trim();
@@ -200,6 +203,8 @@ App.ui = (() => {
     const c = tgt.calib, w = App.view.getWindow(tgt);
     const setup = { chNames, channels, t1: App.calib.tAt(c, tgt.cursors.x1), t2: App.calib.tAt(c, tgt.cursors.x2), tA: App.calib.tAt(c, w.xa), tB: App.calib.tAt(c, w.xb) };
     const doc = await App.docs.addMerged(`${shortName(tgt.name)} + ${shortName(src.name)}`, parts, data, setup, tgt.id);
+    const notes = [tgt, src].filter(d => d.userNotes).map(d => `[${shortName(d.name)}]\n${d.userNotes.trim()}`);
+    if (notes.length) { doc.userNotes = notes.join('\n\n'); App.docs.touch(doc, 'notes'); }
     if ($('#mg-remove').checked) { await App.docs.remove(src.id); await App.docs.remove(tgt.id); }
     App.docs.setActive(doc.id);
     toast('Merged. Shift a recording in time under Recordings in the Display panel, or Ctrl+drag its curve.');
@@ -302,7 +307,7 @@ App.ui = (() => {
   function snapshot(d) {
     const snap = JSON.parse(JSON.stringify(Object.fromEntries(SNAP_KEYS.map(k => [k, d[k] === undefined ? null : d[k]]))));
     if (d.kind === 'series') snap.window = { ...App.view.getWindow(d) };
-    if (d.parts) snap.shifts = d.parts.map(p => p.shift || 0);
+    if (d.parts) { snap.shifts = d.parts.map(p => p.shift || 0); snap.cursors = JSON.parse(JSON.stringify(d.cursors)); }
     return snap;
   }
   /** Run a bulk change on doc d with an undo offered on button `btn` (id) for a few seconds. */
@@ -319,6 +324,7 @@ App.ui = (() => {
     clearTimeout(undo.timer); undo = null;
     if (snap.shifts) { d.parts.forEach((p, k) => { p.shift = snap.shifts[k]; }); App.docs.remerge(d); }
     for (const k of SNAP_KEYS) d[k] = snap[k];
+    if (snap.cursors) d.cursors = snap.cursors;   // in the restored grid's sample index (remerge above)
     if (snap.window) App.view.setWindow(d, snap.window.xa, snap.window.xb);
     if (snap.shifts) App.docs.remerge(d, true); else App.docs.touch(d, 'calib');
     toast(`${label} undone.`);
@@ -448,16 +454,19 @@ App.ui = (() => {
     if (d.notes && d.notes.length) html += `<ul class="notes series-notes">${d.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>`;
     return html;
   }
-  // Merged views: one row per recording with its channels, its time shift and "Align".
+  // Merged views: the first recording is the time reference; every other one has a single time
+  // offset against it (two files = one number), set by typing, Align at the cursors or Ctrl+drag.
   function recordingsHtml(d) {
-    const rows = d.parts.map((p, k) => {
-      const chips = d.series.cols.filter(col => col.part === k).map(col => `<span class="chip" style="--c:${App.calib.channelById(col.id).color}">${col.id}</span>`).join('');
-      return `<div class="rec-row"><span class="rec-chips">${chips}</span><span class="rec-name" title="${esc(p.name)}">${esc(shortName(p.name))}</span>
-        <input data-shift="${k}" value="${esc(formatSI(p.shift || 0, 's', 4))}" title="Time shift of this recording. Wheel or ↑/↓: 1/10 of the visible time/div (Shift: 1 div). Or Ctrl+drag its curve in the plot.">
-        ${undoable(d, `btn-align-${k}`, 'Align', 'Shift this recording so that its point under cursor 2 moves to cursor 1. Put cursor 1 on a feature of another curve and cursor 2 on the same feature of this recording')}</div>`;
+    const chips = k => d.series.cols.filter(col => col.part === k).map(col => `<span class="chip" style="--c:${App.calib.channelById(col.id).color}">${col.id}</span>`).join('');
+    const name = p => `<span class="rec-name" title="${esc(p.name)}">${esc(shortName(p.name))}</span>`;
+    const rows = d.parts.slice(1).map((p, i) => {
+      const k = i + 1;
+      return `<div class="rec-row"><span class="rec-chips">${chips(k)}</span>${name(p)}
+        <input data-shift="${k}" value="${esc(formatSI(p.shift || 0, 's', 4))}" title="Time offset of this recording against the reference. Wheel or ↑/↓: 1/10 of the visible time/div (Shift: 1 div). Or Ctrl+drag its curve in the plot.">
+        ${undoable(d, `btn-align-${k}`, 'Align', 'Put one cursor on a feature of the reference and the other on the same feature of this recording (either order), then Align: this recording moves so the two features line up')}</div>`;
     }).join('');
-    return `<div class="recordings"><div class="rec-head"><span>Recordings</span><span>time shift</span></div>${rows}
-      <p class="tip muted">Align: cursor 1 on a feature (an edge, a peak) of one curve, cursor 2 on the same feature of another recording, then Align on that recording's row.</p></div>`;
+    return `<div class="recordings"><div class="rec-head">Time offset against <span class="rec-chips">${chips(0)}</span>${name(d.parts[0])}</div>${rows}
+      <p class="tip muted">Align: one cursor on a feature (an edge, a peak) of the reference, the other on the same feature of the other recording, either order, then Align.</p></div>`;
   }
   function syncShifts(d) {
     if (!d.parts) return;
@@ -474,13 +483,24 @@ App.ui = (() => {
     const inp = document.querySelector(`#calib [data-shift="${k}"]`);
     if (inp) inp.focus();
   }
-  /** Shift recording k so that the point under cursor 2 moves to cursor 1; cursor 2 follows it. */
+  /**
+   * Align recording k to the reference: one cursor marks a feature of the reference, the other the
+   * same feature of recording k, in either order. Which is which: the assignment under which the
+   * curves around the two cursors have the more similar shape (App.series.shapeMatch); when that is
+   * unclear, cursor 1 = reference. Recording k moves so its feature lands on the reference's cursor,
+   * and its cursor follows. -> true if cursor 1 was on recording k.
+   */
   function alignAtCursors(d, k) {
-    const c = d.calib;
-    d.parts[k].shift = (d.parts[k].shift || 0) + App.calib.tAt(c, d.cursors.x1) - App.calib.tAt(c, d.cursors.x2);
+    const c = d.calib, s = d.series, t1 = App.calib.tAt(c, d.cursors.x1), t2 = App.calib.tAt(c, d.cursors.x2);
+    const cols = part => s.cols.filter(col => col.part === part && c.channels[col.id].on);
+    const w = seriesWindow(d).tdiv;   // compare ±1 visible div around each cursor
+    const a = App.series.shapeMatch(s, cols(0), t1, cols(k), t2, w), b = App.series.shapeMatch(s, cols(0), t2, cols(k), t1, w);
+    const swapped = b !== null && (a === null || b > a + 0.05);
+    d.parts[k].shift = (d.parts[k].shift || 0) + (swapped ? t2 - t1 : t1 - t2);
     App.docs.remerge(d);
-    d.cursors.x2 = d.cursors.x1;
+    if (swapped) d.cursors.x1 = d.cursors.x2; else d.cursors.x2 = d.cursors.x1;
     App.docs.remerge(d, true);
+    return swapped;
   }
 
   /** Keep the time/div + centre fields in step with zoom/pan (unless the user is typing in them). */
@@ -626,11 +646,23 @@ App.ui = (() => {
     });
   }
 
+  // ---------------------------------------------------------------- notes (free text per doc)
+  function renderNotes() {
+    const d = App.docs.active(), t = $('#doc-notes');
+    t.disabled = !d;
+    if (document.activeElement !== t || !d) t.value = (d && d.userNotes) || '';
+  }
+  function initNotes() {
+    const t = $('#doc-notes');
+    t.addEventListener('input', () => { const d = App.docs.active(); if (d) { d.userNotes = t.value; App.docs.touch(d, 'notes'); } });
+    t.addEventListener('keydown', e => { if (e.key === 'Escape') t.blur(); });
+  }
+
   function renderAll() {
     const d = App.docs.active();
     document.body.classList.toggle('empty', !App.docs.list().length);
     document.body.classList.toggle('series', !!(d && d.kind === 'series'));
-    renderStrip(); renderReadout(); renderCalib(); renderStatus(null);
+    renderStrip(); renderReadout(); renderCalib(); renderNotes(); renderStatus(null);
     syncToggles(); applyPanelSize();
     App.view.render();
     if (!d) return;
@@ -694,6 +726,7 @@ App.ui = (() => {
     initSplitter();
     initStripDrag();
     initMergeDialog();
+    initNotes();
     $('#probe-btns').addEventListener('click', e => { const b = e.target.closest('[data-probe]'); if (b) toggleProbe(b.dataset.probe); });
     $('#calib').addEventListener('change', onCalibChange);
     $('#calib').addEventListener('keydown', e => {
@@ -722,8 +755,9 @@ App.ui = (() => {
       }
       if (id === 'btn-undo') doUndo();
       if (id.startsWith('btn-align-')) {
-        withUndo(d, id, 'Align', () => alignAtCursors(d, +id.slice(10)));
-        toast('Recording shifted: the point under cursor 2 is now at cursor 1. Undo is offered for 10 s.');
+        let swapped = false;
+        withUndo(d, id, 'Align', () => { swapped = alignAtCursors(d, +id.slice(10)); });
+        toast(`Aligned: ${shortName(d.parts[+id.slice(10)].name)} at cursor ${swapped ? 1 : 2} moved onto the reference at cursor ${swapped ? 2 : 1}. Undo is offered for 10 s.`);
       }
       if (id === 'btn-copydisp') copyDisplay(d);
       if (id === 'btn-pastedisp' && copiedDisplay) pasteDisplay(d);
@@ -743,7 +777,7 @@ App.ui = (() => {
     App.events.on('docs-changed', () => { document.body.classList.toggle('empty', !App.docs.list().length); renderStrip(); renderStatus(null); });
     App.events.on('active-changed', renderAll);
     App.events.on('doc-updated', (d, what) => {
-      if (d !== App.docs.active()) return;
+      if (d !== App.docs.active() || what === 'notes') return;   // typing in the Notes card: nothing to redraw
       renderReadout();
       if (what === 'shift') { syncShifts(d); App.view.render(); return; }   // Ctrl+drag of a curve, many per second
       if (what !== 'cursors' && what !== 'prefs') { renderCalib(); renderStrip(); }

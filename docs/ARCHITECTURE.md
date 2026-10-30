@@ -65,7 +65,8 @@ modules under `App.dpt`:
   the analyzer session.
 - **Open in scope view** (context menu in `ui.js`, `openInScope` in `app.js`): the DPT page opens
   `index.html` as the named tab `scope-analyzer` and sends
-  `{ type: 'scope-open', id, docs: [{ name, csv, names, edge: {t1, t2, a, b} }] }` by `postMessage`
+  `{ type: 'scope-open', id, docs: [{ name, notes, csv, names, edge: {t1, t2, a, b} }] }` by `postMessage`
+  (name and notes from `App.dpt.app.scopeLabel`)
   (works between file:// pages, no shared storage needed). The shot's channels are merged into one
   CSV. The analyzer (`App.loaders.initHandoff`, only when `window.opener` is set) posts
   `scope-ready` once its session is restored and `scope-ack` per payload; the DPT page resends
@@ -85,6 +86,7 @@ A **doc** is one loaded screenshot (`js/state.js`):
 | `chNames` | yes | `{C1: 'Vout', ...}` custom channel names (series: defaults from the CSV headers, `App.series.autoNames`); display them with `App.calib.chLabel(doc, id)` → `C1 (Vout)` |
 | `axisCh` | yes | series: channel whose values label the y axis, set by the last interaction (see `App.series.axisChannel`) |
 | `cursors` | yes | `{x1, x2, sel, periods, probe}`: `probe` = ids of the channels the cursors read (missing = default, see `App.measure.probedChannels`); cursor positions in **image px**, `sel` = keyboard target, `periods` = multi-period mode `{p0, x1}` (reference period and cursor-1 anchor in image px) or null |
+| `userNotes` | yes | free text from the Notes card (`renderNotes` / `initNotes` in `js/ui.js`); DPT shots start with their parameters. Saved with `touch(doc, 'notes')`, which does not re-render |
 | `parts` | yes | merged views only (`blob = null`): `[{name, blob, shift, map}]`, see "Merged views" |
 | `bitmap, imgData, traces, thumbUrl, view` | no | runtime caches, rebuilt on load (series: `series, thumbUrl, view = {xa, xb}`; merged: `+ partData`) |
 
@@ -107,7 +109,8 @@ screenshots unchanged. The only branches on `doc.kind === 'series'`:
 #### Merged views
 
 A merged view is a series doc built from several recordings (`parts`). Each part stores its own file
-blob, a time `shift` (s) and `map` (source column id → channel id in the view, at most C1..C4).
+blob, a time `shift` (s; `parts[0]` is the time reference with shift 0, the merge dialog normalises
+this, so two files = one offset) and `map` (source column id → channel id in the view, at most C1..C4).
 `App.series.combine(parts, partData)` builds `doc.series`: columns keep their own samples and get
 their own timing `col.t0` (incl. shift) / `col.dt` / `col.part`, and the virtual sample grid spans
 all parts at the finest dt (virtual, nothing is allocated per sample). So **never index `col.v` with
@@ -117,7 +120,7 @@ x directly**: read with `App.series.valueAt` (converts via `colIndex`) and draw 
   onto another, the ⧉ button or M). A merged doc brings its parts along when merged again.
 - A shift change calls `App.docs.remerge(doc, final)`: rebuilds the grid and remaps cursors,
   multi-period marks and the window so they keep their times. Shifts are edited in the Display
-  panel (Recordings), by Align at the cursors (undoable, `shifts` in the undo snapshot) or by
+  panel (Recordings), by Align at the cursors (either cursor order: `App.series.shapeMatch` decides which cursor marks the reference; undoable: `shifts` and `cursors` in the undo snapshot) or by
   Ctrl+drag on a curve in `App.view` (emits `doc-updated` with `'shift'` while dragging).
 - Export / import store each part's blob separately (packed per part in the smaller formats).
 

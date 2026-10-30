@@ -109,6 +109,26 @@ try {
   $csv = Invoke-CdpJs $sess 'App.dpt.ui.tableText(",").split("\n")'
   Check 'CSV has 40 rows + header' ($csv.Count -eq 41 -and $csv[0] -match '\[V/s\]') $csv[0]
 
+  # --- filter: / focuses it, terms narrow table, trend and overlay; bad terms are flagged; Esc clears
+  Send-CdpKey $sess '/' 'Slash' 191
+  Check '/ focuses the filter' ((Invoke-CdpJs $sess 'document.activeElement.id') -eq 'flt')
+  $setF = { param($t) Invoke-CdpJs $sess "(() => { const i = document.getElementById('flt'); i.value = '$t'; i.dispatchEvent(new Event('input')); return true; })()" | Out-Null; Start-Sleep -Milliseconds 400 }
+  & $setF 'rg = 10'
+  $f = Invoke-CdpJs $sess 'JSON.stringify({ rows: document.querySelectorAll("#tbl tbody tr").length, pts: App.dpt.ui.debug().trend.length, struck: document.querySelectorAll(".shot.filtered").length, title: document.getElementById("tbl-title").textContent })' | ConvertFrom-Json
+  Check 'Rg=10 filters table, trend and pool list' ($f.rows -eq 20 -and $f.pts -eq 20 -and $f.struck -eq 20 -and $f.title -match '20 of 40') ($f | ConvertTo-Json -Compress)
+  $mid = Invoke-CdpJs $sess '(() => { const v = App.dpt.pool.rows("fall1").map(r => r.p.I).sort((a, b) => a - b); return v[20]; })()'
+  & $setF "Rg=10  I ~ $($mid) A"
+  $n = Invoke-CdpJs $sess "App.dpt.pool.rows('fall1').filter(r => r.edge && Math.abs(r.p.I - $mid) <= 0.1 * $mid && r.batch.params.some(p => p.key === 'Rg' && p.value === 10)).length"
+  $got = Invoke-CdpJs $sess 'document.querySelectorAll("#tbl tbody tr").length'
+  Check 'I~x combines with Rg=10' ($got -eq $n -and $n -gt 0) "$got rows, $n expected (I~$($mid)A)"
+  Shot $sess 'dpt_filter.png'
+  & $setF 'Rg=10 I>>5'
+  Check 'unreadable term marked invalid' (Invoke-CdpJs $sess 'document.getElementById("flt").classList.contains("invalid")')
+  Invoke-CdpJs $sess 'document.getElementById("flt").focus(); true' | Out-Null
+  Send-CdpKey $sess 'Escape' 'Escape' 27
+  Check 'Esc clears the filter' ((Invoke-CdpJs $sess 'App.dpt.ui.prefs.filter') -eq '' -and (Invoke-CdpJs $sess 'App.dpt.ui.debug().trend.length') -eq 40)
+  Invoke-CdpJs $sess 'document.activeElement.blur(); true' | Out-Null
+
   # --- right-click a table row -> context menu -> open the shot in the analyzer tab
   $row = Invoke-CdpJs $sess '(() => { const tr = document.querySelectorAll("#tbl tbody tr")[2], r = tr.getBoundingClientRect(); return [r.left + 40, r.top + r.height / 2, tr.dataset.row, tr.children[1].textContent]; })()'
   Invoke-Cdp $sess 'Input.dispatchMouseEvent' @{ type = 'mousePressed'; x = $row[0]; y = $row[1]; button = 'right'; buttons = 2; clickCount = 1 } | Out-Null
@@ -122,7 +142,11 @@ try {
   Check 'menu closes' ((Invoke-CdpJs $sess 'document.getElementById("ctx-menu").style.display') -eq 'none')
   $scope = Connect-CdpTarget $sess '*index.html*'
   try {
-    Wait-Cdp $scope "window.App && App.docs.active() && App.docs.active().name.endsWith('/ $($row[3])')" 30
+    Wait-Cdp $scope "window.App && App.docs.active() && App.docs.active().name.startsWith('$($row[3]) \u00b7 ')" 30
+    $lbl = Invoke-CdpJs $sess "JSON.stringify(App.dpt.app.scopeLabel(App.dpt.pool.shots.find(s => s.id === '$($row[2])')))" | ConvertFrom-Json
+    $sn = Invoke-CdpJs $scope 'JSON.stringify({ name: App.docs.active().name, notes: document.getElementById("doc-notes").value })' | ConvertFrom-Json
+    Check 'name = values only (shot, Rg, Vdc, I)' ($sn.name -match "^$($row[3]) \u00b7 (10|22) \u00b7 24 V \u00b7 [\d.]+ A \(NOR45A24_Rg(10|22)_24V\)$") $sn.name
+    Check 'notes list parameters and I shot' (($sn.notes -eq $lbl.notes) -and ($sn.notes -match 'Rg = (10|22)') -and ($sn.notes -match 'Vdc = 24 V') -and ($sn.notes -match 'I shot = [\d.]+ A')) ($sn.notes -replace "`n", ' | ')
     $d = Invoke-CdpJs $scope '(() => { const d = App.docs.active(), s = d.series, t = x => s.t0 + x * s.dt; return JSON.stringify({ ch: s.cols.map(c => c.id + c.unit).join(","), n: App.docs.list().length, c1: t(d.cursors.x1), c2: t(d.cursors.x2), a: t(d.view.xa), b: t(d.view.xb) }); })()'
     $o = $d | ConvertFrom-Json
     Check 'shot opened in analyzer (C1 V + C3 A)' ($o.ch -eq 'C1V,C3A' -and $o.n -eq 1) $d
@@ -134,6 +158,35 @@ try {
     Start-Sleep -Milliseconds 800
     Check 'O reuses the open shot' ((Invoke-CdpJs $scope 'App.docs.list().length') -eq 1)
   } finally { $scope.Ws.Dispose() }
+
+  # --- repeats: give folder 2 the parameters of folder 1, so every shot pair merges into one point
+  $n0 = Invoke-CdpJs $sess 'App.dpt.ui.debug().trend.length'
+  Invoke-CdpJs $sess '(() => { const [a, b] = App.dpt.pool.batches; window.__p = b.params; return App.dpt.pool.updateBatch(b.id, { params: a.params.map(q => Object.assign({}, q)) }).then(() => true); })()' | Out-Null
+  Set-Select $sess 'sel-repeats' 'range'
+  $n1 = Invoke-CdpJs $sess 'App.dpt.ui.debug().trend.length'
+  Check 'repeats merge into one point per shot' ($n1 * 2 -eq $n0) "$n0 -> $n1"
+  Shot $sess 'dpt_repeats.png'
+  Set-Select $sess 'sel-repeats' 'off'
+  Check 'Repeats: each shot shows all points' ((Invoke-CdpJs $sess 'App.dpt.ui.debug().trend.length') -eq $n0)
+  Set-Select $sess 'sel-repeats' 'sd'
+  Invoke-CdpJs $sess '(() => { const b = App.dpt.pool.batches[1]; return App.dpt.pool.updateBatch(b.id, { params: window.__p }).then(() => true); })()' | Out-Null
+
+  # --- new parameter in folder 2 -> asked for the value of folder 1, Enter fills it in
+  Invoke-CdpJs $sess 'App.dpt.ui.openBatchDialog({ batchId: App.dpt.pool.batches[1].id }); true' | Out-Null
+  Wait-Cdp $sess 'document.querySelector("#batch-dlg").open' 10
+  Invoke-CdpJs $sess 'document.querySelector("[data-bd=add-param]").click(); true' | Out-Null
+  $last = Invoke-CdpJs $sess 'document.querySelectorAll("#bd-params tr[data-k]").length - 1'
+  Invoke-CdpJs $sess "($setParamJs)($last, 'key', 'SC')" | Out-Null
+  Invoke-CdpJs $sess "($setParamJs)($last, 'text', '1')" | Out-Null
+  Invoke-CdpJs $sess 'document.querySelector("[data-bd=ok]").click()' | Out-Null
+  Wait-Cdp $sess 'document.querySelector("#newparam-dlg").open' 10
+  Check 'new parameter asks for a default' ((Invoke-CdpJs $sess 'document.querySelector("#np-params td").textContent') -eq 'SC')
+  Shot $sess 'dpt_new_param.png'
+  Invoke-CdpJs $sess '(() => { const i = document.querySelector("#np-params input"); i.value = "3"; return true; })()' | Out-Null
+  Send-CdpKey $sess 'Enter' 'Enter' 13
+  Wait-Cdp $sess '!document.querySelector("#newparam-dlg").open && !document.querySelector("#batch-dlg").open' 10
+  $sc = Invoke-CdpJs $sess 'App.dpt.pool.batches.map(b => (b.params.find(p => p.key === "SC") || {}).value).join(",")'
+  Check 'default filled into the earlier folder' ($sc -eq '3,1') $sc
 
   # --- hide a folder, reload, everything restored
   Invoke-CdpJs $sess 'document.querySelectorAll(".batch summary input")[1].click(); true' | Out-Null

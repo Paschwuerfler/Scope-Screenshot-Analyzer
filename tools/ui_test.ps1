@@ -124,6 +124,14 @@ try {
   Check 'multi-period: small cursor-1 nudge keeps mode' $still
   Invoke-CdpJs $sess "App.docs.setActive('$id4')" | Out-Null
 
+  # --- Notes card: typing saves into the active doc, switching images shows each doc's own text
+  Invoke-CdpJs $sess '(() => { const t = document.getElementById("doc-notes"); t.focus(); t.value = "Rg = 10 Ohm\nnoisy probe"; t.dispatchEvent(new Event("input")); t.blur(); return true; })()' | Out-Null
+  Invoke-CdpJs $sess "App.docs.setActive('$id1')" | Out-Null
+  $nOther = Invoke-CdpJs $sess 'document.getElementById("doc-notes").value'
+  Invoke-CdpJs $sess "App.docs.setActive('$id4')" | Out-Null
+  $nBack = Invoke-CdpJs $sess 'document.getElementById("doc-notes").value'
+  Check 'notes are per image' (($nOther -ne $nBack) -and ($nBack -eq "Rg = 10 Ohm`nnoisy probe")) "other='$nOther'"
+
   # --- reload: session restored from IndexedDB
   Start-Sleep -Milliseconds 800   # let debounced save run
   # navigate to the plain URL (a reload would keep ?samples and re-import the samples)
@@ -136,6 +144,8 @@ try {
   Check 'reload restores session' (($rid -eq $id4) -and ([math]::Abs($rx - $x2) -lt 0.01)) "active=$rid x1=$rx"
   $rn = Invoke-CdpJs $sess "App.docs.get('$idRen') && App.docs.get('$idRen').name"
   Check 'reload keeps renamed image' ($rn -eq 'renamed shot') "name=$rn"
+  $rnotes = Invoke-CdpJs $sess 'document.getElementById("doc-notes").value'
+  Check 'reload keeps notes' ($rnotes -eq "Rg = 10 Ohm`nnoisy probe") $rnotes
   Invoke-CdpJs $sess "App.docs.setActive('$id1')" | Out-Null
   $rn3 = Invoke-CdpJs $sess 'App.measure.periodCount(App.docs.active())'
   Check 'reload keeps multi-period mode' ($rn3 -eq 3) "N=$rn3"
@@ -412,20 +422,49 @@ try {
   if ($ShotDir) { Save-CdpScreenshot $sess (Join-Path $ShotDir 'ui_merge_dialog.png') }
   Invoke-CdpJs $sess 'document.querySelector("#merge-dlg [data-act=ok]").click()' | Out-Null
   Wait-Cdp $sess 'App.docs.list().length === 3 && App.docs.active().parts' 30
-  $m = Invoke-CdpJs $sess '(() => { const d = App.docs.active(), src = App.docs.list().find(x => x.name.startsWith("WFM05")), s = d.series; const t = src.series.t0 + 734.4 * src.series.dt; const x = (t - s.t0) / s.dt; return { parts: d.parts.length, ids: s.cols.map(c => c.id).join(","), names: JSON.stringify(d.chNames), v: App.series.valueAt(s, "C3", x), v0: App.series.valueAt(src.series, "C1", 734.4), idx: App.docs.list().indexOf(d), recs: document.querySelectorAll("#calib .rec-row").length }; })()'
-  Check 'merged view: 2 recordings, C1..C3, values from the source samples' (($m.parts -eq 2) -and ($m.ids -eq 'C1,C2,C3') -and ($null -ne $m.v0) -and ([math]::Abs($m.v - $m.v0) -lt 1e-6) -and ($m.idx -eq 1) -and ($m.recs -eq 2) -and ($m.names -eq '{"C1":"Vout","C2":"Vvcc","C3":"WFM05 C1"}')) ("ids={0} names={1} v={2} src={3}" -f $m.ids, $m.names, $m.v, $m.v0)
+  $m = Invoke-CdpJs $sess '(() => { const d = App.docs.active(), src = App.docs.list().find(x => x.name.startsWith("WFM05")), s = d.series; const t = src.series.t0 + 734.4 * src.series.dt; const x = (t - s.t0) / s.dt; return { parts: d.parts.length, ids: s.cols.map(c => c.id).join(","), names: JSON.stringify(d.chNames), v: App.series.valueAt(s, "C3", x), v0: App.series.valueAt(src.series, "C1", 734.4), idx: App.docs.list().indexOf(d), recs: document.querySelectorAll("#calib [data-shift]").length, ref: d.parts[0].shift }; })()'
+  Check 'merged view: 2 recordings, C1..C3, one time offset, values from the source samples' (($m.parts -eq 2) -and ($m.ids -eq 'C1,C2,C3') -and ($null -ne $m.v0) -and ([math]::Abs($m.v - $m.v0) -lt 1e-6) -and ($m.idx -eq 1) -and ($m.recs -eq 1) -and ($m.ref -eq 0) -and ($m.names -eq '{"C1":"Vout","C2":"Vvcc","C3":"WFM05 C1"}')) ("ids={0} names={1} v={2} src={3}" -f $m.ids, $m.names, $m.v, $m.v0)
 
   # time shift typed into the Recordings row: the WFM05 curve moves by exactly that
   Invoke-CdpJs $sess '(() => { const i = document.querySelector("#calib [data-shift=\"1\"]"); i.value = "5 ns"; i.dispatchEvent(new Event("change", { bubbles: true })); })()' | Out-Null
   $sh = Invoke-CdpJs $sess '(() => { const d = App.docs.active(), src = App.docs.list().find(x => x.name.startsWith("WFM05")), s = d.series; const t = src.series.t0 + 734.4 * src.series.dt + 5e-9; return { shift: d.parts[1].shift, v: App.series.valueAt(s, "C3", (t - s.t0) / s.dt), v0: App.series.valueAt(src.series, "C1", 734.4) }; })()'
   Check 'typed time shift moves the recording' (([math]::Abs($sh.shift - 5e-9) -lt 1e-15) -and ($null -ne $sh.v0) -and ([math]::Abs($sh.v - $sh.v0) -lt 1e-6)) ("shift={0} v={1} src={2}" -f $sh.shift, $sh.v, $sh.v0)
 
-  # Align at cursors: the point under cursor 2 moves to cursor 1, then undo
-  $al = Invoke-CdpJs $sess '(() => { const d = App.docs.active(), c = d.calib; d.cursors.x1 = App.calib.xAt(c, 2e-9); d.cursors.x2 = App.calib.xAt(c, 9e-9); App.docs.touch(d); document.getElementById("btn-align-1").click(); return { shift: d.parts[1].shift, t1: App.calib.tAt(d.calib, d.cursors.x1), t2: App.calib.tAt(d.calib, d.cursors.x2), undo: !!document.getElementById("btn-undo") }; })()'
-  Check 'Align at cursors shifts by t1 - t2, cursor 2 follows' (([math]::Abs($al.shift - (5e-9 - 7e-9)) -lt 1e-14) -and ([math]::Abs($al.t1 - 2e-9) -lt 1e-13) -and ([math]::Abs($al.t2 - 2e-9) -lt 1e-13) -and $al.undo) ("shift={0} t1={1} t2={2}" -f $al.shift, $al.t1, $al.t2)
-  if ($ShotDir) { Start-Sleep -Milliseconds 200; Save-CdpScreenshot $sess (Join-Path $ShotDir 'ui_merge_aligned.png') }
-  $un = Invoke-CdpJs $sess '(() => { document.getElementById("btn-undo").click(); return App.docs.active().parts[1].shift; })()'
-  Check 'undo Align restores the shift' ([math]::Abs($un - 5e-9) -lt 1e-15) "shift=$un"
+  # Align at cursors, both cursor orders: WFM05 merged with a copy of itself, the copy 5 ns late,
+  # one cursor on the edge of each. Align must bring the offset back to 0 either way; undo restores
+  # offset and cursors. (Runs on its own merged view, removed again afterwards.)
+  $al = Invoke-CdpJs $sess @'
+(async () => {
+  const keep = App.docs.active(), src = App.docs.list().find(x => x.name === 'WFM05.csv');
+  const copy = await App.docs.addSeries(src.blob, 'WFM05 copy.csv');
+  App.ui.openMerge(copy.id, src.id);
+  document.querySelector('#merge-dlg [data-act=ok]').click();
+  for (let k = 0; k < 50 && !(App.docs.active().parts && App.docs.active() !== keep); k++) await new Promise(r => setTimeout(r, 50));
+  const d = App.docs.active(), c = () => d.calib, s0 = src.series.cols[0], half = (s0.min + s0.max) / 2;
+  let i = 0; while (s0.v[i] < half) i++;
+  const te = src.series.t0 + i * src.series.dt, T = x => App.calib.tAt(c(), x), out = {};
+  for (const order of ['refFirst', 'refSecond']) {
+    d.parts[1].shift = 5e-9; App.docs.remerge(d, true);
+    App.view.setWindow(d, App.calib.xAt(c(), te - 50e-9), App.calib.xAt(c(), te + 50e-9));
+    const xr = App.calib.xAt(c(), te), xo = App.calib.xAt(c(), te + 5e-9);
+    Object.assign(d.cursors, order === 'refFirst' ? { x1: xr, x2: xo } : { x1: xo, x2: xr });
+    App.docs.touch(d);
+    document.getElementById('btn-align-1').click();
+    const r = { shift: d.parts[1].shift, t1: T(d.cursors.x1), t2: T(d.cursors.x2) };
+    document.getElementById('btn-undo').click();
+    Object.assign(r, { uShift: d.parts[1].shift, u1: T(d.cursors.x1), u2: T(d.cursors.x2), w1: T(order === 'refFirst' ? xr : xo), w2: T(order === 'refFirst' ? xo : xr) });
+    out[order] = r;
+  }
+  await App.docs.remove(d.id); await App.docs.remove(copy.id); App.docs.setActive(keep.id);
+  return { te, out };
+})()
+'@
+  foreach ($o in 'refFirst', 'refSecond') {
+    $r = $al.out.$o
+    Check "Align, reference at cursor $(if ($o -eq 'refFirst') { 1 } else { 2 }): offset back to 0, cursors on the edge" (([math]::Abs($r.shift) -lt 1e-13) -and ([math]::Abs($r.t1 - $al.te) -lt 1e-12) -and ([math]::Abs($r.t2 - $al.te) -lt 1e-12)) ("shift={0} t1={1} t2={2} edge={3}" -f $r.shift, $r.t1, $r.t2, $al.te)
+    Check "undo Align ($o) restores the offset and the cursors" (([math]::Abs($r.uShift - 5e-9) -lt 1e-15) -and ([math]::Abs($r.u1 - $r.w1) -lt 1e-12) -and ([math]::Abs($r.u2 - $r.w2) -lt 1e-12)) ("shift={0} t1={1} t2={2}" -f $r.uShift, $r.u1, $r.u2)
+  }
+  Wait-Cdp $sess 'App.docs.list().length === 3 && App.docs.active().parts' 10
 
   # Ctrl+drag the WFM05 curve 100 px to the right
   $g = Invoke-CdpJs $sess @'
@@ -453,8 +492,8 @@ try {
   Invoke-Cdp $sess 'Page.reload' @{} | Out-Null
   Start-Sleep -Milliseconds 500
   Wait-Cdp $sess 'window.App && App.docs && App.docs.list().length === 3 && App.docs.active()' 30
-  $rl = Invoke-CdpJs $sess '(() => { const d = App.docs.active(); return { parts: d.parts && d.parts.length, shift: d.parts && d.parts[1].shift, n: d.series.cols.length, recs: document.querySelectorAll("#calib .rec-row").length }; })()'
-  Check 'reload restores the merged view with its shift' (($rl.parts -eq 2) -and ([math]::Abs($rl.shift - $cd) -lt 1e-15) -and ($rl.n -eq 3) -and ($rl.recs -eq 2)) ("parts={0} shift={1}" -f $rl.parts, $rl.shift)
+  $rl = Invoke-CdpJs $sess '(() => { const d = App.docs.active(); return { parts: d.parts && d.parts.length, shift: d.parts && d.parts[1].shift, n: d.series.cols.length, recs: document.querySelectorAll("#calib [data-shift]").length }; })()'
+  Check 'reload restores the merged view with its shift' (($rl.parts -eq 2) -and ([math]::Abs($rl.shift - $cd) -lt 1e-15) -and ($rl.n -eq 3) -and ($rl.recs -eq 1)) ("parts={0} shift={1}" -f $rl.parts, $rl.shift)
 
   # export / import round trip (original files and lossless) keeps recordings and shift
   $rt = Invoke-CdpJs $sess @'

@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DPT Sweep</title>
 <!-- ?v=N: same cache-busting number as index.html, bump both on every publish -->
-<link rel="stylesheet" href="css/app.css?v=8">
-<link rel="stylesheet" href="css/dpt.css?v=8">
+<link rel="stylesheet" href="css/app.css?v=10">
+<link rel="stylesheet" href="css/dpt.css?v=10">
 </head>
 <body class="empty">
 
@@ -57,6 +57,7 @@
         <label>Y <select id="sel-metric"></select></label>
         <label>X <select id="sel-x"></select></label>
         <label>Group by <select id="sel-group" title="One line, colour and marker per value of this parameter"></select></label>
+        <label>Repeats <select id="sel-repeats" title="Shots with the same shot name and identical folder parameters (e.g. a setup measured three times) become one point: mean with an error bar"><option value="sd">mean ± σ</option><option value="range">mean, min–max</option><option value="off">each shot</option></select></label>
         <button id="tgl-logx" class="toggle" title="Logarithmic X axis (L), useful when the current steps grow geometrically">Log X</button>
         <span class="sep"></span>
         <button data-act="copy-trend" title="Copy the trend plot as a PNG image">Copy image</button>
@@ -66,6 +67,10 @@
     <div class="table-box">
       <div class="stage-tools">
         <b id="tbl-title">Edges</b>
+        <span class="sep"></span>
+        <label class="flt">Filter <input id="flt" spellcheck="false" autocomplete="off" placeholder="e.g. I~10A  RHR=330"
+          title="Show only matching shots in table and plots (/). Terms separated by spaces, all must match:&#10;I~10A  around 10 A (±10 %) · I~10A±2A · I~10±20%&#10;I=8..12A  range · I>5A · I<=2A · ~10A (no key = I)&#10;RHR=330 · VCC!=24 · Folder=33045A24 · I_edge>1A&#10;plain text: folder or shot name contains it&#10;Esc clears"></label>
+        <button id="flt-clear" class="small" title="Clear the filter" hidden>×</button>
         <span class="spacer"></span>
         <button data-act="copy-table" title="Copy the table as tab-separated text, e.g. for Excel (C)">Copy</button>
         <button data-act="export-csv" title="Save the table as CSV (values in SI units)">Export CSV</button>
@@ -107,6 +112,13 @@
   <div class="dialog-actions"><button data-bd="cancel">Cancel</button> <button data-bd="ok" class="primary">Add to pool</button></div>
 </dialog>
 
+<dialog id="newparam-dlg">
+  <h3>New parameter</h3>
+  <p id="np-text"></p>
+  <table id="np-params" class="bd-params"></table>
+  <div class="dialog-actions"><button data-np="skip">Leave empty</button> <button data-np="ok" class="primary">Fill in</button></div>
+</dialog>
+
 <dialog id="help" class="wide">
   <h3>DPT Sweep</h3>
   <p>Every dropped folder becomes a <b>batch</b>: its shots plus the parameters you enter for it.
@@ -118,6 +130,7 @@
     <tr><td><kbd>F</kbd></td><td>Fit overlay to the whole edge</td></tr>
     <tr><td><kbd>←</kbd> <kbd>→</kbd> · <kbd>+</kbd> <kbd>−</kbd></td><td>Pan · zoom the overlay time axis</td></tr>
     <tr><td><kbd>C</kbd></td><td>Copy table (tab-separated)</td></tr>
+    <tr><td><kbd>/</kbd></td><td>Filter shots (table and both plots), e.g. <code>I~10A</code> (around 10 A, ±10 %), <code>I~10A±2A</code>, <code>I=8..12A</code>, <code>I&gt;5A</code>, <code>RHR=330</code>, <code>33045</code> (folder / shot name); <kbd>Esc</kbd> clears</td></tr>
     <tr><td><kbd>O</kbd></td><td>Open the hovered shot (else the pinned shots) in the scope view</td></tr>
     <tr><td><kbd>Esc</kbd></td><td>Unpin all shots</td></tr>
     <tr><td>Hover / click</td><td>Hover a curve, point or row to highlight that shot everywhere; click to pin it</td></tr>
@@ -135,13 +148,13 @@
   <div class="dialog-actions"><button data-act="close">Close</button></div>
 </dialog>
 
-<script src="js/util.js?v=8"></script>
-<script src="js/series.js?v=8"></script>
-<script src="js/loaders.js?v=8"></script>
-<script src="js/dpt/edges.js?v=8"></script>
-<script src="js/dpt/pool.js?v=8"></script>
-<script src="js/dpt/plot.js?v=8"></script>
-<script src="js/dpt/ui.js?v=8"></script>
-<script src="js/dpt/app.js?v=8"></script>
+<script src="js/util.js?v=10"></script>
+<script src="js/series.js?v=10"></script>
+<script src="js/loaders.js?v=10"></script>
+<script src="js/dpt/edges.js?v=10"></script>
+<script src="js/dpt/pool.js?v=10"></script>
+<script src="js/dpt/plot.js?v=10"></script>
+<script src="js/dpt/ui.js?v=10"></script>
+<script src="js/dpt/app.js?v=10"></script>
 </body>
 </html>

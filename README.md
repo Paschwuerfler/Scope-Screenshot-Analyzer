@@ -135,14 +135,18 @@ them in one plot:
    The new view starts with the cursors and visible time window of the first recording.
 
 **Aligning on the time axis.** The recordings start on their own time stamps (t = 0 is usually
-the trigger). The Display panel of a merged view has a **Recordings** list with a **time shift**
-per recording:
-- type a shift (e.g. `-12.5 ns`), or use the wheel or **↑/↓** in the field (1/10 of the visible
+the trigger). The first recording is the time reference. The other one has a single **time offset**
+against it, shown under **Time offset against …** in the Display panel. Merging two files gives one
+number; each further merged file adds one more. To set it:
+- type it (e.g. `-12.5 ns`), or use the wheel or **↑/↓** in the field (1/10 of the visible
   time/div, **Shift** = 1 div);
-- **Align**: put cursor 1 on a feature (an edge, a peak) of one curve and cursor 2 on the same feature
-  of another recording, then click **Align** in that recording's row. It moves so the feature lands on
-  cursor 1 (cursor 2 moves with it). For 10 s the button reads **↶ Undo**;
-- **Ctrl+drag a curve** in the plot slides its whole recording sideways.
+- **Align**: put one cursor on a feature (an edge, a peak) of the reference and the other cursor on
+  the same feature of the other recording, in either order, then click **Align**. The other
+  recording moves so its feature lands on the reference's cursor, and its cursor moves with it. The
+  app tells which cursor is on which recording by comparing the curve shapes around the two
+  cursors; if that is unclear, it assumes cursor 1 is on the reference. The message after Align
+  says which way it went. For 10 s the button reads **↶ Undo**, which also puts the cursors back;
+- **Ctrl+drag a curve** of the other recording in the plot to slide it sideways (the reference stays put).
 
 A merged view can be merged again with another CSV. Screenshots cannot be merged, because they
 have no sample data.
@@ -158,7 +162,9 @@ several folders into one **pool** and compares their switching edges.
    which channel is the **switch node** (default C1) and which the **current** (default C3), and enter
    what is **constant in this folder**, e.g. `Rg = 10 Ω`, `Vdc = 24 V`, `Device = GaN-A`. Values are
    pre-filled from the previous folder and from the folder name (`NOR45A24_Rg10_24V` → Rg = 10,
-   V = 24 V). The current of a shot can be overridden there.
+   V = 24 V). The current of a shot can be overridden there. When you save a folder with a parameter
+   that none of the folders already in the pool has, you are asked for its value in those folders
+   (<kbd>Enter</kbd> fills it in, **Leave empty** / <kbd>Esc</kbd> skips).
 3. Repeat with the next folder (e.g. the same current steps with another gate resistor). Several
    folders dropped at once open one dialog after another. **Edit** on a folder changes all of this later.
 
@@ -173,16 +179,28 @@ click to pin it, <kbd>Esc</kbd> to unpin):
   per value. Wheel zooms the time axis, drag pans, double-click or <kbd>F</kbd> fits.
 - **Trend**: one metric (Y) against a numeric parameter (X), one line and marker shape per value of
   *Group by* (e.g. one line per Rg). **Log X** (<kbd>L</kbd>) helps with geometric current steps.
-  Points with a yellow dot have a warning.
+  Points with a yellow dot have a warning. **Repeats**: shots with the same shot name (S01, S02, …)
+  and identical folder parameters, e.g. one setup measured three times into three folders, are
+  drawn as one point at the mean with error bars (± σ or min–max, in Y and in the measured
+  current) and the single values as small dots; *each shot* turns this off. Clicking such a point
+  pins all its shots; hovering shows the single values.
 - **Table**: every shot with its parameters and metrics; click a header to sort. **Copy** gives
   tab-separated text for Excel, **Export CSV** plain SI numbers with units in the header.
+- **Filter** (above the table, <kbd>/</kbd>): shows only matching shots in the table and both plots
+  (Copy / Export CSV too); the pool list strikes the others through. Terms are separated by spaces
+  and must all match: `I~10A` (around 10 A, ±10 %), `I~10A±2A`, `I~10A±20%`, `I=8..12A`, `I>5A`,
+  `I<=2A`, `~10A` (no key = shot current), `I_edge>1A`, `Rg=10`, `Vdc!=24`, `Folder=NOR45A24_Rg10_24V`,
+  or plain text that the folder or shot name contains. Unreadable terms turn the box red (hover it to
+  see which) and are ignored. <kbd>Esc</kbd> in the box clears it. Colours keep their scale over all shots.
 
 **Open in the scope view**: right-click a shot (pool entry, curve, trend point or table row) and
 choose **Open in scope view**, or hover it and press <kbd>O</kbd> (with nothing hovered, <kbd>O</kbd>
 opens all pinned shots). The analyzer opens in its own tab (reused next time) with the shot as one
 CSV image (all channels), zoomed to the overlay's time window around the selected edge and with
-the cursors on its 10 % and 90 % crossings. Opening the same shot again reuses it. If nothing
-happens, allow pop-ups for the page.
+the cursors on its 10 % and 90 % crossings. Its name lists the values (shot, folder parameters,
+shot current), e.g. `S20 · 10 · 24 V · 32.4 A (NOR45A24_Rg10_24V)`, and its **Notes** start with
+the same values with their keys (`Rg = 10`, `Vdc = 24 V`, `I shot = 32.4 A`). Opening the same shot
+again reuses it and keeps your notes. If nothing happens, allow pop-ups for the page.
 
 Checkboxes in the pool show / hide single shots or whole folders. **Export pool** saves raw data
 and parameters to a `.json` file (drop it onto the page or use **Import pool** on another computer).
@@ -215,6 +233,12 @@ rectangle over the outer grid border, enter the number of divisions, then set ti
 the centre, and per channel V/div and 0 level.
 
 Supported layouts: **R&S RTB2004** (1280×824 screenshots, normal and persistence display).
+
+## Notes
+
+The **Notes** card under the calibration holds free text per image (test conditions, probe,
+what you saw). It is saved with the image and exported with the session. Merging two CSVs keeps
+both notes in the merged view. <kbd>Esc</kbd> leaves the text box.
 
 ## Saving
 
