@@ -189,7 +189,7 @@ click to pin it, <kbd>Esc</kbd> to unpin):
   drawn as one point at the mean with error bars (± σ or min–max, in Y and in the measured
   current) and the single values as small dots; *each shot* turns this off. Clicking such a point
   pins all its shots; hovering shows the single values. A clicked point keeps its tooltip open with
-  **Hide these N shots** (hides every shot of that point for now), **Open in scope view** and
+  **Hide folder** (hides all shots of the folder(s) of that point for now), **Open in scope view** and
   **Show in list**; click elsewhere, click the point again or press <kbd>Esc</kbd> to close it. **Double-click** a point to scroll the
   folder list on the left to that shot (its folder opens and the shot flashes), so you can read the
   folder's parameters; the right-click menu has the same as **Show in folder list** for any view.
@@ -217,8 +217,9 @@ the same values with their keys (`Rg = 10`, `Vdc = 24 V`, `I = 32.4 A`). Opening
 again reuses it and keeps your notes. If nothing happens, allow pop-ups for the page.
 
 **Showing and hiding shots**: the checkboxes in the pool show / hide single shots or whole folders;
-this choice is saved with the pool. **Hide** on a folder (or on a clicked trend point, in the
-right-click menu, or <kbd>H</kbd> for the pinned shots, else the hovered one) hides shots only for now:
+this choice is saved with the pool. **Hide** on a folder (or **Hide folder** on a clicked trend point
+or in the right-click menu; **Hide** there and <kbd>H</kbd> hide just the shot, <kbd>H</kbd> the pinned
+shots, else the hovered one) hides shots only for now:
 they leave the plots and the table, get a *hidden* tag in the pool list (click it to show that shot
 again), and come back with **Unhide** on the folder, **Unhide all** above the pool list
 (<kbd>Shift</kbd>+<kbd>H</kbd>) or a reload. **Collapse repeats** above the pool list merges folders

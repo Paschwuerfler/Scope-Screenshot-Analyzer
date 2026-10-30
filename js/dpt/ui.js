@@ -319,6 +319,12 @@ App.dpt.ui = (() => {
     renderHidden();
     toast(`${ids.length === 1 ? '1 shot' : ids.length + ' shots'} hidden · Unhide all (Shift+H) shows them again`);
   }
+  /** All shot ids of the folders these shots belong to. */
+  function folderShots(ids) {
+    const bs = new Set(pool.shots.filter(s => ids.includes(s.id)).map(s => s.batchId));
+    return pool.shots.filter(s => bs.has(s.batchId)).map(s => s.id);
+  }
+  const folderCount = ids => new Set(pool.shots.filter(s => ids.includes(s.id)).map(s => s.batchId)).size;
   function unhideShots(ids) { for (const id of ids) tmpHidden.delete(id); renderHidden(); }
   function unhideAll() { if (!tmpHidden.size) return; tmpHidden.clear(); renderHidden(); }
   function renderHidden() { renderPool(); renderTable(); drawOverlay(); drawTrend(); }
@@ -641,12 +647,12 @@ App.dpt.ui = (() => {
     const tip = $('#tip-trend'); tip.classList.remove('locked'); tip.style.display = 'none';
   }
   function lockTip(hit, mx, my) {
-    const ids = hit.rows.map(r => r.shot.id), n = ids.length;
+    const ids = hit.rows.map(r => r.shot.id), n = folderCount(ids);
     tipLock = { ids };
     const tip = $('#tip-trend');
     tip.classList.add('locked');
     showTip(tip, mx, my, $('#cv-trend'), trendTipHtml(hit) + `<div class="tip-acts">
-      <button data-tip="hide" title="Hide ${n > 1 ? 'all shots of this point' : 'this shot'} from plots and table for now (H)">Hide ${n > 1 ? `these ${n} shots` : 'this shot'}</button>
+      <button data-tip="hide" title="Hide all shots of ${n > 1 ? 'the folders' : 'the folder'} of this point from plots and table for now (Unhide on the folder or Shift+H shows them again)">Hide ${n > 1 ? `these ${n} folders` : 'folder'}</button>
       <button data-tip="open" title="Open in the analyzer (O)">Open in scope view</button>
       <button data-tip="reveal" title="Scroll the folder list to this shot">Show in list</button></div>`);
   }
@@ -670,7 +676,7 @@ App.dpt.ui = (() => {
     tip.addEventListener('click', e => {
       const a = e.target.dataset.tip, ids = tipLock && tipLock.ids;
       if (!a || !ids) return;
-      if (a === 'hide') hideShots(ids);
+      if (a === 'hide') hideShots(folderShots(ids));
       else { closeTip(); if (a === 'open') App.dpt.app.openInScope(ids); else revealShot(ids[0]); }
     });
     document.addEventListener('pointerdown', e => { if (tipLock && !tip.contains(e.target) && e.target !== cv) closeTip(); }, true);
@@ -963,6 +969,7 @@ App.dpt.ui = (() => {
     'open-pinned': () => App.dpt.app.openInScope([...pinned]),
     pin: id => togglePin(id),
     hide: (id, ids) => hideShots(ids),
+    'hide-folder': (id, ids) => hideShots(folderShots(ids)),
     reveal: id => revealShot(id),
   };
   function openMenu(e) {
@@ -976,6 +983,7 @@ App.dpt.ui = (() => {
       ${many ? `<button data-ctx="open-pinned">Open all ${pinned.size} pinned shots</button>` : ''}
       <button data-ctx="pin">${pinned.has(id) ? 'Unpin' : 'Pin'}</button>
       <button data-ctx="hide" title="Hide from plots and table for now (H); Unhide all (Shift+H) shows it again">${ids.length > 1 ? `Hide all ${ids.length} repeats` : 'Hide'}</button>
+      <button data-ctx="hide-folder" title="Hide all shots of the folder for now">${folderCount(ids) > 1 ? `Hide these ${folderCount(ids)} folders` : 'Hide folder'}</button>
       <button data-ctx="reveal" title="Scroll the folder list to this shot (double-click a trend point)">Show in folder list</button>`;
     m.style.display = 'block';
     m.style.left = Math.min(e.clientX, innerWidth - m.offsetWidth - 4) + 'px';

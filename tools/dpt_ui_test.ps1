@@ -221,7 +221,7 @@ try {
   Shot $sess 'dpt_table_collapsed.png'
   Invoke-CdpJs $sess 'App.dpt.ui.unpinAll(); document.querySelector("#tgl-collapse").click(); true' | Out-Null
   Check 'uncollapse restores the rows' ((Invoke-CdpJs $sess 'document.querySelectorAll("#tbl tr[data-row]").length') -eq $r0)
-  # click a repeat point -> its tooltip stays open with Hide; Hide removes both shots (not saved) and unpins them
+  # click a repeat point -> its tooltip stays open with Hide; Hide hides both folders of the point (not saved) and unpins
   $pt = Invoke-CdpJs $sess '(() => { const p = App.dpt.ui.debug().trend.find(q => q.n === 2), r = document.getElementById("cv-trend").getBoundingClientRect(); return [r.left + p.X, r.top + p.Y]; })()'
   Send-CdpMouse $sess 'mouseMoved' $pt[0] $pt[1]
   Send-CdpMouse $sess 'mousePressed' $pt[0] $pt[1]; Send-CdpMouse $sess 'mouseReleased' $pt[0] $pt[1]
@@ -230,11 +230,11 @@ try {
   Shot $sess 'dpt_point_tip.png'
   Invoke-CdpJs $sess 'document.querySelector("[data-tip=hide]").click(); true' | Out-Null
   $hs = Invoke-CdpJs $sess 'JSON.stringify({ pts: App.dpt.ui.debug().trend.length, hidden: App.dpt.ui.debug().hidden.length, pinned: App.dpt.ui.debug().pinned.length, saved: App.dpt.pool.shots.filter(s => s.hidden).length, tag: document.querySelectorAll("#pool-list .tag").length, unhide: !document.getElementById("unhide-all").hidden })'
-  Check 'Hide removes the point, not saved' ($hs -eq ('{"pts":' + ($n1 - 1) + ',"hidden":2,"pinned":0,"saved":0,"tag":2,"unhide":true}')) $hs
+  Check 'Hide hides the folders of the point, not saved' ($hs -eq '{"pts":0,"hidden":42,"pinned":0,"saved":0,"tag":42,"unhide":true}') $hs
   # pool list: Collapse repeats -> one entry for both folders, shots merged by name
   Invoke-CdpJs $sess 'document.getElementById("tgl-pool-collapse").click(); true' | Out-Null
   $pc = Invoke-CdpJs $sess 'JSON.stringify({ batches: document.querySelectorAll("#pool-list .batch").length, items: document.querySelectorAll("#pool-list li[data-ids]").length, off: document.querySelectorAll("#pool-list li.off").length })'
-  Check 'pool Collapse repeats: one entry, 21 merged shots' ($pc -eq '{"batches":1,"items":21,"off":1}') $pc
+  Check 'pool Collapse repeats: one entry, 21 merged shots' ($pc -eq '{"batches":1,"items":21,"off":21}') $pc
   Shot $sess 'dpt_pool_collapsed.png'
   Invoke-CdpJs $sess 'document.querySelector("#pool-list [data-bact=hide]").click(); true' | Out-Null
   Check 'Unhide on the entry shows its shots again' ((Invoke-CdpJs $sess 'App.dpt.ui.debug().hidden.length') -eq 0)
