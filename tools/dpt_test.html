@@ -74,11 +74,17 @@
   check('rise overshoot', Math.abs(er.overshoot - (rr.pk - o.top)) < 0.35, `${F(er.overshoot, 'V')} expected ${F(rr.pk - o.top, 'V')}`);
   check('rise ringing pk-pk', near(er.ringPP, rr.pp, 0.06), `${F(er.ringPP, 'V')} expected ${F(rr.pp, 'V')}`);
   check('rise t50', Math.abs(er.t50 - (o.tOn + o.tr / 2)) < 0.4e-9, `${F(er.t50, 's')} expected ${F(o.tOn + o.tr / 2, 's')}`);
-  check('edge current', near(er.iEdge, 12, 0.02) && near(r.iMean, 12, 0.01), `${F(er.iEdge, 'A')} mean ${F(r.iMean, 'A')}`);
+  check('shot current', near(r.iMean, 12, 0.01), F(r.iMean, 'A'));
+  check('rise ringing frequency', near(er.fRing, o.f, 0.03), `${F(er.fRing, 'Hz')} expected ${F(o.f, 'Hz')}`);
   check('fall slew 10-90', near(ef.slew1090, sw / o.tf, 0.04), `${R(ef.slew1090)} expected ${R(sw / o.tf)}`);
   const fr = firstRing(s.clean, iOff, -1);
   check('fall undershoot', Math.abs(ef.overshoot - (o.base - fr.pk)) < 0.35, `${F(ef.overshoot, 'V')} expected ${F(o.base - fr.pk, 'V')}`);
   check('fall ringing pk-pk', near(ef.ringPP, fr.pp, 0.08), `${F(ef.ringPP, 'V')} expected ${F(fr.pp, 'V')}`);
+  check('fall ringing frequency', near(ef.fRing, o.f, 0.03), `${F(ef.fRing, 'Hz')} expected ${F(o.f, 'Hz')}`);
+  for (const f of [30e6, 60e6, 250e6]) {
+    const ef2 = App.dpt.edges.analyze(synth(Object.assign({}, o, { f, tau: 2 / f })), null).edges[0];
+    check(`ringing frequency ${F(f, 'Hz')}`, near(ef2.fRing, f, 0.04), F(ef2.fRing, 'Hz'));
+  }
   check('no warnings', !r.warn.length && !er.warn.length && !ef.warn.length, [...r.warn, ...er.warn, ...ef.warn].join('; '));
 
   lines.push('\n== edge cases');
@@ -88,9 +94,15 @@
   const noRing = synth(Object.assign({}, o, { amp: 0, amp2: 0, tOff: undefined }));
   const rn = App.dpt.edges.analyze(noRing, null);
   check('no ringing -> ringPP 0', rn.edges.length === 1 && rn.edges[0].ringPP === 0 && rn.edges[0].overshoot < 0.3, `${F(rn.edges[0].ringPP, 'V')} os ${F(rn.edges[0].overshoot, 'V')}`);
+  check('no ringing -> no frequency', rn.edges[0].fRing === null, F(rn.edges[0].fRing, 'Hz'));
   const clip = synth(Object.assign({}, o, { tOff: undefined }));
   for (let i = 0; i < clip.v.length; i++) clip.v[i] = Math.min(clip.v[i], 46);
-  check('clipping flagged', App.dpt.edges.analyze(clip, null).warn.some(w => /clipped/.test(w)));
+  const rc = App.dpt.edges.analyze(clip, null);
+  check('clipping flagged', rc.clipped.sw && rc.warn.some(w => /clipped/.test(w)));
+  const curClip = { t0: noRing.t0, dt: noRing.dt, v: noRing.v.map((x, i) => Math.min(20 + i * 0.01, 30)) };
+  const rcc = App.dpt.edges.analyze(noRing, curClip);
+  check('clipped current flagged', rcc.clipped.cur && !rcc.clipped.sw && rcc.warn.some(w => /current possibly clipped/.test(w)), rcc.warn.join('; '));
+  check('unclipped current ramp not flagged', !App.dpt.edges.analyze(noRing, { t0: 0, dt: 1, v: noRing.v.map((x, i) => 20 + i * 0.01) }).clipped.cur);
 
   lines.push('\n== parameters');
   const g = App.dpt.pool.guessParams('NOR45A24_Rg10_24V');
@@ -102,6 +114,13 @@
   check('param 4.7mOhm', Math.abs(pm.value - 4.7e-3) < 1e-12 && pm.unit === 'Ω', JSON.stringify(pm));
   check('text param', App.dpt.pool.param('Device', 'GaN-X').value === null);
 
+  lines.push('\n== import warnings');
+  const item = (label, dt, clip) => ({ label, sw: { dt }, cur: { dt }, res: { clipped: { sw: false, cur: !!clip } } });
+  const w1 = App.dpt.pool.addWarnings([item('S01', 4e-10), item('S02', 4e-10)]);
+  check('same rate, no clipping -> no warning', !w1.length, w1.join('; '));
+  const w2 = App.dpt.pool.addWarnings([item('S01', 4e-10), item('S02', 8e-10, true)]);
+  check('rate mismatch + clipped current', w2.length === 2 && /different sample rates/.test(w2[0]) && /Current possibly clipped: S02$/.test(w2[1]), w2.join('; '));
+
   lines.push('\n== samples/NOR45A24');
   const get = n => new Promise((res, rej) => { const x = new XMLHttpRequest(); x.open('GET', '../samples/NOR45A24/' + n); x.onload = () => res(x.responseText); x.onerror = () => rej(new Error('cannot load ' + n)); x.send(); });
   try {
@@ -112,12 +131,14 @@
       res.push(App.dpt.edges.analyze({ t0: a.t0, dt: a.dt, v: a.cols[0].v }, { t0: c.t0, dt: c.dt, v: c.cols[0].v }));
     }
     check('S01 has no edge', !res[0].edges.length);
+    check('no clipping in NOR45A24', res.every(r => !r.clipped.sw && !r.clipped.cur));
     check('S02..S21 rise1 + fall1', res.slice(1).every(r => r.edges.length === 2 && r.edges[0].kind === 'rise' && r.edges[1].kind === 'fall'));
     check('S21 current', near(res[20].iMean, 43.8, 0.01), F(res[20].iMean, 'A'));
     const sl = res.slice(1).map(r => r.edges[0].slew1090);
     check('rise slew 1.4..2.2 V/ns', sl.every(v => v > 1.4e9 && v < 2.2e9), `${R(Math.min(...sl))} … ${R(Math.max(...sl))}`);
     check('S21 ringing visible', res[20].edges[0].ringPP > 1, F(res[20].edges[0].ringPP, 'V'));
     check('S05 no ringing', res[4].edges[0].ringPP === 0, F(res[4].edges[0].ringPP, 'V'));
+    check('S21 ringing frequency 280..340 MHz', res[20].edges[0].fRing > 280e6 && res[20].edges[0].fRing < 340e6, F(res[20].edges[0].fRing, 'Hz'));
   } catch (e) { check('load samples', false, e.message); }
 
   const out = document.getElementById('out');

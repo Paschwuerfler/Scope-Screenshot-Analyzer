@@ -56,8 +56,11 @@ modules under `App.dpt`:
   Parsed channels (`shot.cols`) and results (`shot.res`) are runtime only, rebuilt on load and when
   the analysis settings change (`pool.setSettings`). Multi-shot changes are saved in one transaction
   (`pool.updateShots`).
+- `pool.addWarnings(items, skip)`: import checks shown in the batch dialog and after Import pool (sample
+  interval of switch node / current differs from the rest of the pool; `res.clipped.sw/cur` from
+  `edges.isClipped`, a run of ≥ 8 samples at the record's extreme).
 - `pool.rows(edgeKey)` flattens the pool to one row per shot for one edge (`'rise1'`, `'fall1'`, …)
-  with all parameters in `row.p` (`I`, `I_edge`, `Folder`, batch params). Every view reads these rows.
+  with all parameters in `row.p` (`I`, `Folder`, batch params). Every view reads these rows.
 - Edge detection: hysteresis at 30 / 70 % of the 2nd–98th percentile range on a 3-point smoothed
   signal, rejected when the range is below 20× the noise sigma. Each edge is then measured between
   its own levels (see README "DPT sweep").

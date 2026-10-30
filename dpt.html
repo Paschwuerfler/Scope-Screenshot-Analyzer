@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DPT Sweep</title>
 <!-- ?v=N: same cache-busting number as index.html, bump both on every publish -->
-<link rel="stylesheet" href="css/app.css?v=10">
-<link rel="stylesheet" href="css/dpt.css?v=10">
+<link rel="stylesheet" href="css/app.css?v=11">
+<link rel="stylesheet" href="css/dpt.css?v=11">
 </head>
 <body class="empty">
 
@@ -35,7 +35,6 @@
       <div class="card-head"><h3>Analysis</h3></div>
       <label title="Peak dv/dt: least-squares slope over this time span (longer = less noise, but a lower peak on fast edges)">dv/dt window <input id="set-dvdt" class="num"></label>
       <label title="Overshoot and first oscillation are searched within this time after the 50 % crossing">Ringing window <input id="set-ring" class="num"></label>
-      <label title="Current at the edge = mean of the current channel over this time before the 50 % crossing">Current window <input id="set-cur" class="num"></label>
     </section>
   </aside>
 
@@ -56,7 +55,7 @@
       <div class="stage-tools">
         <label>Y <select id="sel-metric"></select></label>
         <label>X <select id="sel-x"></select></label>
-        <label>Group by <select id="sel-group" title="One line, colour and marker per value of this parameter"></select></label>
+        <span class="group-by">Group by <span id="sel-groups"></span></span>
         <label>Repeats <select id="sel-repeats" title="Shots with the same shot name and identical folder parameters (e.g. a setup measured three times) become one point: mean with an error bar"><option value="sd">mean ± σ</option><option value="range">mean, min–max</option><option value="off">each shot</option></select></label>
         <button id="tgl-logx" class="toggle" title="Logarithmic X axis (L), useful when the current steps grow geometrically">Log X</button>
         <span class="sep"></span>
@@ -69,7 +68,7 @@
         <b id="tbl-title">Edges</b>
         <span class="sep"></span>
         <label class="flt">Filter <input id="flt" spellcheck="false" autocomplete="off" placeholder="e.g. I~10A  RHR=330"
-          title="Show only matching shots in table and plots (/). Terms separated by spaces, all must match:&#10;I~10A  around 10 A (±10 %) · I~10A±2A · I~10±20%&#10;I=8..12A  range · I>5A · I<=2A · ~10A (no key = I)&#10;RHR=330 · VCC!=24 · Folder=33045A24 · I_edge>1A&#10;plain text: folder or shot name contains it&#10;Esc clears"></label>
+          title="Show only matching shots in table and plots (/). Terms separated by spaces, all must match:&#10;I~10A  around 10 A (±10 %) · I~10A±2A · I~10±20%&#10;I=8..12A  range · I>5A · I<=2A · ~10A (no key = I)&#10;RHR=330 · VCC!=24 · Folder=33045A24&#10;plain text: folder or shot name contains it&#10;Esc clears"></label>
         <button id="flt-clear" class="small" title="Clear the filter" hidden>×</button>
         <span class="spacer"></span>
         <button data-act="copy-table" title="Copy the table as tab-separated text, e.g. for Excel (C)">Copy</button>
@@ -108,6 +107,7 @@
   <table id="bd-params" class="bd-params"></table>
   <button class="small" data-bd="add-param">+ Parameter</button>
   <h4>Shots <span id="bd-count" class="muted"></span></h4>
+  <div id="bd-warn" class="bd-warn" hidden></div>
   <div class="bd-shots-wrap"><table id="bd-shots" class="grid-table"></table></div>
   <div class="dialog-actions"><button data-bd="cancel">Cancel</button> <button data-bd="ok" class="primary">Add to pool</button></div>
 </dialog>
@@ -143,18 +143,19 @@
     <tr><td>Peak dv/dt</td><td>Largest least-squares slope over the dv/dt window between the 10 % and 90 % crossings</td></tr>
     <tr><td>Overshoot</td><td>Furthest excursion beyond the final level within the ringing window (3-point smoothed)</td></tr>
     <tr><td>Ringing pk-pk</td><td>First oscillation after the 50 % crossing: first peak minus the following valley (smoothed)</td></tr>
+    <tr><td>Ringing frequency</td><td>From the spacing of the ringing peaks and valleys after the first peak (half a period each, up to 4 periods); empty when there is less than one full period</td></tr>
   </table>
   <p class="muted"><span class="badge warn">!</span> marks shots or edges whose values may be unreliable (no edge, clipped, level not settled); hover it for the reason.</p>
   <div class="dialog-actions"><button data-act="close">Close</button></div>
 </dialog>
 
-<script src="js/util.js?v=10"></script>
-<script src="js/series.js?v=10"></script>
-<script src="js/loaders.js?v=10"></script>
-<script src="js/dpt/edges.js?v=10"></script>
-<script src="js/dpt/pool.js?v=10"></script>
-<script src="js/dpt/plot.js?v=10"></script>
-<script src="js/dpt/ui.js?v=10"></script>
-<script src="js/dpt/app.js?v=10"></script>
+<script src="js/util.js?v=11"></script>
+<script src="js/series.js?v=11"></script>
+<script src="js/loaders.js?v=11"></script>
+<script src="js/dpt/edges.js?v=11"></script>
+<script src="js/dpt/pool.js?v=11"></script>
+<script src="js/dpt/plot.js?v=11"></script>
+<script src="js/dpt/ui.js?v=11"></script>
+<script src="js/dpt/app.js?v=11"></script>
 </body>
 </html>

@@ -4,7 +4,8 @@
 //   grid:     { left, right, top, bottom, hdiv, vdiv }   // graticule in image px
 //   time:     { tdiv, tCenter }                           // s/div, time at horizontal grid centre
 //   channels: { C1: { on, vdiv, unit, zeroY }, ... }      // V/div and y (image px) of 0 V
-//   persistence: bool, persistChannel: 'C4'|null         // colour-graded display mode
+//   persistence: bool, persistChannel: 'C4'|null,        // colour-graded display mode
+//   selected: 'C1'|null                                   // channel whose scale the axis labels show
 // }
 // `status` (stored next to calib on the doc) mirrors the fields with 'ok' | 'warn' | 'manual'.
 App.calib = (() => {

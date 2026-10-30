@@ -6,7 +6,8 @@ App.dpt.ui = (() => {
   const P = App.dpt.plot, U = App.util, pool = App.dpt.pool;
   const esc = U.escapeHtml;
   const PREFS_KEY = 'dpt-prefs';
-  const prefs = Object.assign({ edge: null, color: 'I', metric: 'slew1090', x: 'I', group: 'Folder', repeats: 'sd', logX: false, filter: '', sort: null, view: null }, loadPrefs());
+  const prefs = Object.assign({ edge: null, color: 'I', metric: 'slew1090', x: 'I', groups: ['Folder'], repeats: 'sd', logX: false, filter: '', sort: null, view: null }, loadPrefs());
+  if (typeof prefs.group === 'string') { prefs.groups = prefs.group ? [prefs.group] : []; delete prefs.group; }   // prefs before multi-key grouping
   let hover = null;              // shot id under the mouse (any view)
   const pinned = new Set();      // shot ids pinned by click
   const collapsed = new Set();   // batch ids collapsed in the pool list
@@ -20,6 +21,7 @@ App.dpt.ui = (() => {
     { key: 'overshoot', label: 'Overshoot', unit: 'V', zero: true },
     { key: 'overshootPct', label: 'Overshoot (% of swing)', unit: '%', zero: true },
     { key: 'ringPP', label: 'Ringing pk-pk (1st oscillation)', unit: 'V', zero: true },
+    { key: 'fRing', label: 'Ringing frequency', unit: 'Hz', zero: true },
     { key: 'swing', label: 'Swing', unit: 'V' },
     { key: 'base', label: 'Level before edge', unit: 'V' },
     { key: 'top', label: 'Level after edge', unit: 'V' },
@@ -65,7 +67,7 @@ App.dpt.ui = (() => {
    *   I~10A  around 10 A (±10 %), I~10A±2A or I~10±20% for another tolerance
    *   I=8..12A (an open end is allowed: I=..5A)   I>5A   I<=2A   RHR=330   VCC!=24   Folder=33045A24
    *   ~10A  >5A  without a key = shot current I · plain text = folder or shot name contains it
-   * Keys are the parameter names (case-insensitive) plus I, I_edge, Folder, Shot.
+   * Keys are the parameter names (case-insensitive) plus I, Folder, Shot.
    * Returns { test(row), bad: [terms that could not be read], n: number of terms }.
    */
   function compileFilter(text) {
@@ -152,12 +154,37 @@ App.dpt.ui = (() => {
     prefs.color = fillSelect($('#sel-color'), keys.map(k => ({ value: k.key, label: k.label })), prefs.color);
     prefs.metric = fillSelect($('#sel-metric'), METRICS.map(m => ({ value: m.key, label: m.label })), prefs.metric);
     prefs.x = fillSelect($('#sel-x'), keys.filter(k => k.numeric).map(k => ({ value: k.key, label: k.label })), prefs.x);
-    prefs.group = fillSelect($('#sel-group'), [{ value: '', label: 'none' }, ...keys.filter(k => k.key !== prefs.x).map(k => ({ value: k.key, label: k.label }))], prefs.group);
+    renderGroupSelects(keys);
     $('#sel-repeats').value = prefs.repeats;
     $('#tgl-logx').classList.toggle('on', !!prefs.logX);
   }
-  function onSelect(id, key) {
-    $(id).addEventListener('change', e => { prefs[key] = e.target.value; if (key === 'edge') prefs.view = null; savePrefs(); renderAll(); });
+  /**
+   * Group by: one select per key in prefs.groups plus an empty one to add another key, so
+   * SC + RHR gives one line per (SC, RHR) pair. Choosing 'none' in a select drops that key.
+   */
+  function renderGroupSelects(keys) {
+    const avail = keys.filter(k => k.key !== prefs.x);
+    prefs.groups = prefs.groups.filter((g, i) => avail.some(k => k.key === g) && prefs.groups.indexOf(g) === i);
+    const sels = [...prefs.groups, ''].slice(0, avail.length);
+    $('#sel-groups').innerHTML = sels.map((g, i) => {
+      const opts = [{ value: '', label: i ? '+' : 'none' }, ...avail.filter(k => k.key === g || !prefs.groups.includes(k.key)).map(k => ({ value: k.key, label: k.label }))];
+      return `<select data-gi="${i}" title="${i ? 'Also split by this parameter' : 'One line, colour and marker per value of this parameter'}">${
+        opts.map(o => `<option value="${esc(o.value)}"${o.value === g ? ' selected' : ''}>${esc(o.label)}</option>`).join('')}</select>`;
+    }).join('');
+  }
+  function initGroupSelects() {
+    $('#sel-groups').addEventListener('change', e => {
+      const i = +e.target.dataset.gi, v = e.target.value, g = prefs.groups.slice();
+      if (v) g[i] = v; else g.splice(i, 1);
+      prefs.groups = g; savePrefs();
+      renderGroupSelects(pool.paramKeys()); drawTrend();
+      const next = $(`#sel-groups [data-gi="${v ? i : Math.max(0, i - 1)}"]`);
+      if (next) next.focus();                      // keep keyboard focus after the re-render
+    });
+  }
+  /** A select bound to prefs[key]; redraw = what depends on it (default: everything). */
+  function onSelect(id, key, redraw = renderAll) {
+    $(id).addEventListener('change', e => { prefs[key] = e.target.value; if (key === 'edge') prefs.view = null; savePrefs(); redraw(); });
   }
 
   // ---------------------------------------------------------------- pool list
@@ -408,11 +435,13 @@ App.dpt.ui = (() => {
     for (const [mult, u] of [[1e-9, 'V/ns'], [1e-6, 'V/µs'], [1e-3, 'V/ms']]) if (maxAbs * mult >= 0.5) return { mult, u };
     return { mult: 1, u: 'V/s' };
   }
+  /** Group label of a row, e.g. 'SC = 0 · RHR = 100'; cats in order of first appearance. */
+  const groupLabel = r => prefs.groups.map(g => `${g} = ${fmtParam(g, r.p[g])}`).join(' · ');
   function groupInfo() {
-    const g = prefs.group, cats = [];
-    if (!g) return { of: () => 0, cats: [''] };
-    for (const r of allRows()) { const v = fmtParam(g, r.p[g]); if (!cats.includes(v)) cats.push(v); }
-    return { of: r => cats.indexOf(fmtParam(g, r.p[g])), cats };
+    const cats = [];
+    if (!prefs.groups.length) return { of: () => 0, cats: [''] };
+    for (const r of allRows()) { const v = groupLabel(r); if (!cats.includes(v)) cats.push(v); }
+    return { of: r => cats.indexOf(groupLabel(r)), cats };
   }
   /**
    * Trend points. With prefs.repeats on, shots with the same shot name, folder parameters and group
@@ -491,14 +520,16 @@ App.dpt.ui = (() => {
     }
     ctx.globalAlpha = 1;
     ctx.restore();
-    if (prefs.group && gi.cats.length > 1) {
+    if (prefs.groups.length && gi.cats.length > 1) {
       ctx.save(); ctx.font = '11px system-ui, "Segoe UI", sans-serif'; ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
-      const items = gi.cats.slice(0, 8), wMax = Math.max(...items.map(c => ctx.measureText(`${prefs.group} = ${c}`).width)) + 24;
+      const items = gi.cats.slice(0, 8), more = gi.cats.length - items.length;
+      if (more) items.push(`+ ${more} more (grey)`);
+      const wMax = Math.max(...items.map(c => ctx.measureText(c).width)) + 24;
       const x = A.x + A.w - wMax - 10, y = A.y + 12;
       legendBox(ctx, x - 6, y - 9, wMax + 12, items.length * 16 + 4);
       items.forEach((c, k) => {
-        P.marker(ctx, P.MARKERS[k], x + 6, y + k * 16, 4); ctx.fillStyle = P.CATEGORICAL[k]; ctx.fill();
-        ctx.fillStyle = P.INK.fg; ctx.fillText(`${prefs.group} = ${c}`, x + 16, y + k * 16);
+        P.marker(ctx, P.MARKERS[k] || 'circle', x + 6, y + k * 16, 4); ctx.fillStyle = P.CATEGORICAL[k] || P.INK.fg2; ctx.fill();
+        ctx.fillStyle = P.INK.fg; ctx.fillText(c, x + 16, y + k * 16);
       });
       ctx.restore();
     }
@@ -528,7 +559,7 @@ App.dpt.ui = (() => {
       }
       showTip(tip, mx, my, cv, `<b>${esc(hit.r.batch.name)} / ${esc(hit.r.shot.label)}</b><br>` +
         `${esc(keyInfo(prefs.x).label)} = ${esc(fmtParam(prefs.x, hit.r.p[prefs.x]))}<br>${esc(m.label)} = ${esc(fmtMetric(m, hit.r.edge[m.key]))}` +
-        (prefs.group ? `<br>${esc(prefs.group)} = ${esc(fmtParam(prefs.group, hit.r.p[prefs.group]))}` : '') +
+        (prefs.groups.length ? `<br>${esc(groupLabel(hit.r))}` : '') +
         (warn.length ? `<br><span style="color:var(--warn)">! ${esc(warn.join('; '))}</span>` : ''));
     });
     cv.addEventListener('pointerleave', () => { tip.style.display = 'none'; setHover(null); });
@@ -548,8 +579,7 @@ App.dpt.ui = (() => {
       { key: 'folder', label: 'Folder', txt: true, get: r => r.batch.name },
       { key: 'shot', label: 'Shot', txt: true, get: r => r.shot.label },
       ...params.map(k => ({ key: 'p:' + k.key, label: k.key, txt: !k.numeric, unit: k.unit, get: r => r.p[k.key], fmt: v => fmtParam(k.key, v) })),
-      num('I', 'I shot', r => r.p.I, v => U.formatSI(v, 'A', 3)),
-      num('I_edge', 'I edge', r => r.p.I_edge, v => U.formatSI(v, 'A', 3)),
+      num('I', 'I', r => r.p.I, v => U.formatSI(v, 'A', 3)),
       ...METRICS.map(m => ({ key: m.key, label: m.label.replace(' (1st oscillation)', '').replace(' (% of swing)', ' %'), unit: m.unit, get: r => r.edge[m.key], fmt: v => fmtMetric(m, v) })),
       { key: 'warn', label: 'Notes', txt: true, get: r => [...r.shot.res.warn, ...r.edge.warn].join('; ') },
     ];
@@ -631,11 +661,13 @@ App.dpt.ui = (() => {
         <td><button class="small danger" data-bd="del-param" title="Remove">×</button></td></tr>`).join('');
     };
     const renderShots = () => {
+      const items = [];
       $('#bd-count').textContent = `(${shots.length})`;
       $('#bd-shots').innerHTML = `<thead><tr><th>Shot</th><th>Files</th><th>I (mean of ${esc(roles.cur || '–')})</th><th title="Overrides the measured current for this shot">I override</th><th>Edges found</th><th>Notes</th></tr></thead><tbody>` +
         shots.map(s => {
-          const sw = s.cols[roles.sw], cur = roles.cur ? s.cols[roles.cur] : null;
+          const sw = s.cols[roles.sw], cur = roles.cur ? s.cols[roles.cur] || null : null;
           const res = sw ? App.dpt.edges.analyze(sw, cur, pool.settings) : { edges: [], iMean: null, warn: [`no channel ${roles.sw}`] };
+          items.push({ label: s.label, sw, cur, res });
           const ov = over.get(s.id);
           const edges = res.edges.map(e => `${e.kind === 'rise' ? '↑' : '↓'} ${U.formatRate(e.slew1090)}`).join(' · ');
           const notes = [...(s.notes || []), ...res.warn, ...res.edges.flatMap(e => e.warn)];
@@ -643,6 +675,10 @@ App.dpt.ui = (() => {
             <td>${U.formatSI(res.iMean, 'A', 3)}</td><td><input data-f="over" value="${ov !== null && ov !== undefined ? esc(U.formatSI(ov, 'A', 4)) : ''}" placeholder="auto"></td>
             <td>${edges || '<span class="muted">none</span>'}</td><td>${notes.length ? `<span class="badge warn">!</span> ${esc(notes.join('; '))}` : ''}</td></tr>`;
         }).join('') + '</tbody>';
+      // import checks against the rest of the pool: sample rate, clipping
+      const warn = pool.addWarnings(items, new Set([b0.id]));
+      $('#bd-warn').hidden = !warn.length;
+      $('#bd-warn').innerHTML = warn.map(w => `<div><span class="badge warn">!</span> ${esc(w)}</div>`).join('');
     };
     renderParams(); renderShots();
 
@@ -730,10 +766,9 @@ App.dpt.ui = (() => {
     const s = pool.settings;
     $('#set-dvdt').value = U.formatSI(s.dvdtWindow, 's');
     $('#set-ring').value = U.formatSI(s.ringWindow, 's');
-    $('#set-cur').value = U.formatSI(s.curWindow, 's');
   }
   function initSettings() {
-    const map = { '#set-dvdt': 'dvdtWindow', '#set-ring': 'ringWindow', '#set-cur': 'curWindow' };
+    const map = { '#set-dvdt': 'dvdtWindow', '#set-ring': 'ringWindow' };
     for (const [sel, key] of Object.entries(map)) {
       $(sel).addEventListener('change', e => {
         const p = U.parseSI(e.target.value, 's');
@@ -798,9 +833,9 @@ App.dpt.ui = (() => {
 
   // ---------------------------------------------------------------- toast / all
   let toastTimer = 0;
-  function toast(msg) {
+  function toast(msg, ms = 4000) {
     const el = $('#toast'); el.textContent = msg; el.classList.add('show');
-    clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 4000);
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), ms);
   }
 
   function renderAll() {
@@ -821,8 +856,11 @@ App.dpt.ui = (() => {
 
   function init() {
     if (prefs.settings) pool.setSettings(prefs.settings);
-    onSelect('#sel-edge', 'edge'); onSelect('#sel-color', 'color'); onSelect('#sel-metric', 'metric');
-    onSelect('#sel-x', 'x'); onSelect('#sel-group', 'group'); onSelect('#sel-repeats', 'repeats');
+    onSelect('#sel-edge', 'edge');
+    onSelect('#sel-color', 'color', () => { renderPool(); drawOverlay(); });
+    onSelect('#sel-metric', 'metric', () => { drawTrend(); syncHighlight(false); });   // status line shows the metric
+    onSelect('#sel-x', 'x', () => { renderSelects(); drawTrend(); });                 // group options exclude x
+    initGroupSelects(); onSelect('#sel-repeats', 'repeats', drawTrend);
     $('#tgl-logx').addEventListener('click', () => { prefs.logX = !prefs.logX; savePrefs(); renderSelects(); drawTrend(); });
     initPoolEvents(); initOverlayEvents(); initTrendEvents(); initTableEvents(); initSettings(); initMenu(); initFilter();
     App.events.on('pool-changed', renderAll);
@@ -831,7 +869,7 @@ App.dpt.ui = (() => {
   }
 
   /** For tools/dpt_ui_test.ps1: hover / pin state and the trend points as drawn (CSS px in #cv-trend). */
-  const debug = () => ({ hover, pinned: [...pinned], trend: tr.pts.map(p => ({ id: p.r.shot.id, X: p.X, Y: p.Y, y: p.y })) });
+  const debug = () => ({ hover, pinned: [...pinned], trend: tr.pts.map(p => ({ id: p.r.shot.id, X: p.X, Y: p.Y, y: p.y })), groups: groupInfo().cats });
 
   return { init, prefs, debug, renderAll, toast, openBatchDialog, tableText, fitOverlay, zoomOverlay, panOverlay, cycleEdge, unpinAll, togglePin, keyShots, overlayWindow, focusFilter, compileFilter, METRICS };
 })();

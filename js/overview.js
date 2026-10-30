@@ -116,7 +116,7 @@ App.overview = (() => {
     const x = evX(e);
     if (!drag) { const h = hit(d, x); canvas.style.cursor = h === 'move' ? 'grab' : h === 'out' ? 'pointer' : 'ew-resize'; return; }
     if (drag.type === 'c1' || drag.type === 'c2') { App.view.moveCursor(+drag.type[1], toI(d, x), false); return; }
-    const di = toI(d, x) - drag.i0, minW = 8;
+    const di = toI(d, x) - drag.i0, minW = App.view.MIN_WINDOW;
     if (drag.type === 'move') App.view.setWindow(d, drag.xa + di, drag.xb + di);
     else if (drag.type === 'l') App.view.setWindow(d, Math.min(drag.xa + di, drag.xb - minW), drag.xb);
     else App.view.setWindow(d, drag.xa, Math.max(drag.xb + di, drag.xa + minW));
@@ -125,7 +125,7 @@ App.overview = (() => {
   function onWheel(e) {
     const d = doc(); if (!d) return;
     e.preventDefault();
-    const w = App.view.getWindow(d), f = Math.pow(1.0015, -e.deltaY * (e.deltaMode === 1 ? 33 : 1));
+    const w = App.view.getWindow(d), f = App.view.wheelZoom(e);
     // zoom around the window centre if the pointer is inside it, else around the pointer
     const ip = toI(d, evX(e)), c = ip > w.xa && ip < w.xb ? (w.xa + w.xb) / 2 : ip;
     App.view.setWindow(d, c - (c - w.xa) / f, c + (w.xb - c) / f);

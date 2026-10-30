@@ -31,7 +31,8 @@ App.dpt.pool = (() => {
   }
   const strip = sh => ({ id: sh.id, batchId: sh.batchId, label: sh.label, files: sh.files, current: sh.current, hidden: !!sh.hidden });
   const putShots = list => tx('shots', 'readwrite', st => { for (const sh of list) st.put(strip(sh)); }).catch(report);
-  const putBatch = b => tx('batches', 'readwrite', st => st.put(b)).catch(report);
+  const putBatches = list => tx('batches', 'readwrite', st => { for (const b of list) st.put(b); }).catch(report);
+  const putBatch = b => putBatches([b]);
   function report(e) { console.error(e); App.events.emit('toast', `Could not save the pool in this browser: ${e.message}`); }
 
   // ---------------------------------------------------------------- parsing / analysis
@@ -85,7 +86,6 @@ App.dpt.pool = (() => {
     if (!ids.includes(b.roles.cur)) b.roles.cur = ids.find(x => x !== b.roles.sw) || '';
     return { batch: b, shots: list, channels: ids };
   }
-  function analyzeDraft(d) { for (const sh of d.shots) analyzeShot(sh, d.batch.roles); }
 
   /** "NOR45A24_Rg10_24V" -> [{key:'Rg', 10}, {key:'V', 24 V}]; "Rg_1M" -> Rg = 1e6. */
   function guessParams(name) {
@@ -117,11 +117,13 @@ App.dpt.pool = (() => {
     return { key: String(key).trim(), text, value, unit: unit === 'Ohm' ? 'Ω' : unit };
   }
 
-  async function addDraft(d) {
-    batches.push(d.batch); shots.push(...d.shots);
-    analyzeDraft(d);
-    await putBatch(d.batch);
-    await putShots(d.shots);
+  const addDraft = d => addBatches([d.batch], d.shots);
+  /** Add batches with their shots, analyse, save (one transaction per store) and re-render once. */
+  async function addBatches(bs, list) {
+    batches.push(...bs); shots.push(...list);
+    for (const sh of list) analyzeShot(sh, batchOf(sh).roles);
+    await putBatches(bs);
+    await putShots(list);
     App.events.emit('pool-changed');
   }
   async function updateBatch(id, patch) {
@@ -170,6 +172,34 @@ App.dpt.pool = (() => {
     App.events.emit('pool-changed');
   }
 
+  /**
+   * Warnings shown when shots are added: switch node / current sampled at another interval than the
+   * folders already in the pool (or than each other, for the first folder), and clipped channels.
+   * items = [{ label, sw, cur, res }] (channels { dt, v } or null, res from App.dpt.edges.analyze);
+   * batches whose id is in `skip` are left out of the comparison (the ones being added / edited).
+   */
+  function addWarnings(items, skip = new Set()) {
+    const same = (a, b) => Math.abs(a - b) <= 1e-6 * b, rate = dt => App.util.formatSI(1 / dt, 'Sa/s', 3);
+    const uniq = dts => dts.reduce((o, dt) => (o.some(x => same(x, dt)) || o.push(dt), o), []);
+    const names = list => list.length > 6 ? `${list.slice(0, 6).join(', ')} … (${list.length})` : list.join(', ');
+    const chDts = it => [it.sw, it.cur].filter(Boolean).map(c => c.dt);
+    const ref = uniq(shots.filter(sh => !skip.has(sh.batchId) && sh.cols).flatMap(sh => {
+      const r = batchOf(sh).roles;
+      return chDts({ sw: sh.cols[r.sw], cur: sh.cols[r.cur] });
+    }));
+    const out = [], mine = uniq(items.flatMap(chDts));
+    if (ref.length) {
+      const odd = items.filter(it => chDts(it).some(dt => !ref.some(x => same(x, dt))));
+      if (odd.length) out.push(`Sample rate ${uniq(odd.flatMap(chDts)).filter(dt => !ref.some(x => same(x, dt))).map(rate).join(' / ')} differs from the pool (${ref.map(rate).join(' / ')}): ${names(odd.map(it => it.label))}`);
+    } else if (mine.length > 1) out.push(`Shots use different sample rates (${mine.map(rate).join(' / ')})`);
+    const sw = items.filter(it => it.res && it.res.clipped && it.res.clipped.sw).map(it => it.label);
+    const cur = items.filter(it => it.res && it.res.clipped && it.res.clipped.cur).map(it => it.label);
+    if (sw.length) out.push(`Switch node possibly clipped: ${names(sw)}`);
+    if (cur.length) out.push(`Current possibly clipped: ${names(cur)}`);
+    return out;
+  }
+  const shotItem = sh => { const r = batchOf(sh).roles; return { label: `${batchOf(sh).name} / ${sh.label}`, sw: sh.cols[r.sw], cur: sh.cols[r.cur] || null, res: sh.res }; };
+
   // ---------------------------------------------------------------- derived rows
   /** Shot current: user override, else mean of the current channel. */
   const shotCurrent = sh => sh.current !== null && sh.current !== undefined ? sh.current : sh.res && sh.res.iMean;
@@ -177,8 +207,7 @@ App.dpt.pool = (() => {
   /** All parameter keys in the pool: built-ins first, then batch parameters in order of appearance. */
   function paramKeys() {
     const keys = [
-      { key: 'I', label: 'I (shot, C3 mean)', unit: 'A', numeric: true, builtin: true },
-      { key: 'I_edge', label: 'I at edge', unit: 'A', numeric: true, builtin: true },
+      { key: 'I', label: 'I (current channel mean)', unit: 'A', numeric: true, builtin: true },
       { key: 'Folder', label: 'Folder', unit: '', numeric: false, builtin: true },
     ];
     for (const b of batches) for (const p of b.params) {
@@ -209,8 +238,8 @@ App.dpt.pool = (() => {
       const p = { I: shotCurrent(sh), Folder: b.name };
       for (const q of b.params) if (q.key) p[q.key] = q.value !== null ? q.value : q.text;
       const sel = edgeKey ? edges.filter(e => e.kind + e.n === edgeKey) : edges;
-      if (!sel.length && !edgeKey) out.push({ shot: sh, batch: b, edge: null, p: Object.assign({ I_edge: null }, p) });
-      for (const e of sel) out.push({ shot: sh, batch: b, edge: e, p: Object.assign({ I_edge: e.iEdge }, p) });
+      if (!sel.length && !edgeKey) out.push({ shot: sh, batch: b, edge: null, p });
+      for (const e of sel) out.push({ shot: sh, batch: b, edge: e, p });
     }
     return out;
   }
@@ -219,21 +248,23 @@ App.dpt.pool = (() => {
   function exportJson() {
     return JSON.stringify({ app: 'dpt-pool', version: 1, settings, batches, shots: shots.map(strip) });
   }
+  /** Add the batches of an exported pool that are not in it yet; resolves to addWarnings() for the new shots. */
   async function importJson(text, replace = false) {
     const o = JSON.parse(text);
     if (o.app !== 'dpt-pool') throw new Error('not a DPT pool file');
     if (replace) await clear();
-    const known = new Set(batches.map(b => b.id));
-    for (const b of o.batches) {
-      if (known.has(b.id)) continue;
-      const list = o.shots.filter(s => s.batchId === b.id);
-      await addDraft({ batch: b, shots: list.map(s => Object.assign({}, s)) });
-    }
+    const known = new Set(batches.map(b => b.id)), bs = o.batches.filter(b => !known.has(b.id));
+    const byBatch = new Map(bs.map(b => [b.id, []]));
+    for (const s of o.shots) if (byBatch.has(s.batchId)) byBatch.get(s.batchId).push(Object.assign({}, s));
+    if (!bs.length) return [];
+    const list = bs.flatMap(b => byBatch.get(b.id));
+    await addBatches(bs, list);
+    return addWarnings(list.map(shotItem), new Set(bs.map(b => b.id)));
   }
 
   return {
     get batches() { return batches; }, get shots() { return shots; }, get settings() { return settings; },
-    restore, draft, analyzeDraft, addDraft, updateBatch, fillParam, removeBatch, updateShots, clear, setSettings,
-    param, guessParams, shotCurrent, paramKeys, edgeKeys, rows, exportJson, importJson, batchOf,
+    restore, draft, addDraft, updateBatch, fillParam, removeBatch, updateShots, clear, setSettings,
+    param, guessParams, addWarnings, shotCurrent, paramKeys, edgeKeys, rows, exportJson, importJson, batchOf,
   };
 })();

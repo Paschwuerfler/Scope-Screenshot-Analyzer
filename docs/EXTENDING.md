@@ -33,8 +33,16 @@ header, other probe units (A), channel C2, side menu open, zoom/roll modes.
    the layout and extend `tools/harvest.html` to harvest them (it currently iterates RTB regions).
    Glyph templates from different fonts can coexist; consider separating them per layout if
    they collide (e.g. `App.GLYPHS.small_<layout>`).
-4. If channel colours differ, extend `App.calib.CHANNELS` or make colours part of the layout.
+4. If channel colours differ (most other brands: e.g. C3 blue/magenta, C4 red/green), make colours
+   part of the layout first: today `App.calib.CHANNELS` (hue windows, also the display colours) and
+   the persistence heat palette in `traces.js` are global RTB2000 values used for every image.
+   Keep RTB2004 results unchanged (`tools\run_tests.ps1`).
 5. Add samples + ground truth (above).
+
+Long-term goal: auto-detection for any scope. A generic layout would be registered last, used when no
+specific layout matches: find the graticule from grid-line regularity, channel traces by colour
+clusters, and read labels with the anti-aliased OCR engine, reporting most values as `warn` so the user
+checks them. Build towards it by keeping layout-specific numbers out of the shared modules.
 
 ## Add an auto-measurement (slew 20–80 %, overshoot, ringing frequency, min/max, …)
 

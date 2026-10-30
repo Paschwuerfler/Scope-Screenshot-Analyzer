@@ -1,11 +1,12 @@
 // Trace extraction: turns coloured trace pixels inside the graticule into per-column
 // y positions (image px) for each active channel.
 //
-// Result per channel: { mid, lo, hi, raw, blockW, found }
+// Result per channel: { mid, lo, hi, raw, blockW, found, alt? }
 //   mid   = representative y per image column (Float32Array indexed by image x, NaN = none),
 //           smoothed over one sample block (see below)
 //   raw   = unsmoothed per-column y
 //   lo/hi = topmost / bottommost pixel of the chosen run (vertical extent in that column)
+//   alt   = persistence only: second branch where the waveform population splits (same shape) or null
 //
 // Pipeline per channel:
 //   1. classify pixels (channel hue window, or "graded" colours in persistence mode)
@@ -13,8 +14,8 @@
 //      white cursor lines drawn over the trace and the hollow sample blocks), then track
 //      the run that continues the trace from the biggest run outward (skips labels,
 //      markers and other far-away blobs)
-//   3. y per column: run centre (normal) or centre of the hottest pixels (persistence:
-//      blue = rare ... red = frequent)
+//   3. y per column: run centre (normal) or the best continuous path through the heat map
+//      (persistence: blue = rare ... red = frequent, see "persistence" below)
 //   4. sample blocks: at fast timebases the scope draws each ADC sample as a block
 //      several px wide; we detect the block width and box-filter over it, which equals
 //      linear interpolation between sample centres
@@ -147,12 +148,20 @@ App.traces = (() => {
   const EMPTY = -0.05;   // score of a pixel without trace colour
   const STEP = 0.04;     // cost per px of vertical movement between columns
   const MASK_R = 5;      // px around the first path excluded from the second pass
+  const weight = h => 0.05 + h * h;   // path score and centre weight of a pixel with heat h >= 0
+
+  /** Heat-weighted centre of column x within ±3 px of y (y itself if nothing is hot there). */
+  function heatCentre(W, x, y, heatAt) {
+    let sw = 0, sy = 0;
+    for (let k = y - 3; k <= y + 3; k++) { const h = heatAt(k * W + x); if (h >= 0) { const w = weight(h); sw += w; sy += w * k; } }
+    return sw ? sy / sw : y;
+  }
 
   function persistenceTrace(box, { chosen }, heatAt) {
-    const { W, width, x0, x1, y0, y1 } = box;
+    const { W, width, x0, x1 } = box;
     const hasHeat = new Uint8Array(width);
     for (let x = x0; x <= x1; x++) hasHeat[x] = chosen[x] ? 1 : 0;
-    const score = (x, y) => { const h = heatAt(y * W + x); return h < 0 ? EMPTY : 0.05 + h * h; };
+    const score = (x, y) => { const h = heatAt(y * W + x); return h < 0 ? EMPTY : weight(h); };
 
     const p1 = ridgePath(box, hasHeat, score);
     const tr = pathTrace(box, p1, hasHeat, chosen, heatAt);
@@ -187,10 +196,7 @@ App.traces = (() => {
     let found = 0;
     for (let x = x0; x <= x1; x++) {
       if (!hasHeat[x]) continue;
-      const py = path[x];
-      let sw = 0, sy = 0;
-      for (let y = py - 3; y <= py + 3; y++) { const h = heatAt(y * W + x); if (h >= 0) { const w = 0.05 + h * h; sw += w; sy += w * y; } }
-      mid[x] = sw ? sy / sw : py;
+      mid[x] = heatCentre(W, x, path[x], heatAt);
       const r = chosen[x];
       lo[x] = Math.min(r.a, mid[x]); hi[x] = Math.max(r.b, mid[x]); found++;
     }
@@ -212,11 +218,7 @@ App.traces = (() => {
     }
     let n = 0;
     const mid = new Float32Array(width).fill(NaN), lo = new Float32Array(width).fill(NaN), hi = new Float32Array(width).fill(NaN);
-    for (let x = x0; x <= x1; x++) if (ok[x]) {
-      let sw = 0, sy = 0;
-      for (let y = p2[x] - 3; y <= p2[x] + 3; y++) { const h = heatAt(y * W + x); if (h >= 0) { const w = 0.05 + h * h; sw += w; sy += w * y; } }
-      mid[x] = lo[x] = hi[x] = sw ? sy / sw : p2[x]; n++;
-    }
+    for (let x = x0; x <= x1; x++) if (ok[x]) { mid[x] = lo[x] = hi[x] = heatCentre(W, x, p2[x], heatAt); n++; }
     return n >= 30 ? { mid, raw: mid, lo, hi, blockW: 1, found: n } : null;
   }
 

@@ -221,5 +221,5 @@ App.ocr = (() => {
     return cells;
   }
 
-  return { readBitmapLine, readAALine, segmentAA, harvestAA, harvestBitmap, bitmapCell, BM };
+  return { readBitmapLine, readAALine, harvestAA, harvestBitmap };
 })();

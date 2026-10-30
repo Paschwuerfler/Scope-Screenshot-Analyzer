@@ -2,6 +2,8 @@
 // Keyboard map lives in KEYS below — keep it in sync with the help dialog in index.html.
 (() => {
   const $ = sel => document.querySelector(sel);
+  const ZOOM_IN = 1.25, ZOOM_OUT = 0.8;   // keys + / − and the toolbar buttons
+  const showHelp = () => $('#help').showModal();
 
   const KEYS = {
     'ArrowLeft': e => App.view.nudge(-step(e)),
@@ -16,9 +18,9 @@
     'f': () => App.view.fit(),
     '0': () => App.view.fit(),
     'g': () => App.view.fitGrid(),
-    '+': () => App.view.zoom(1.25),
-    '=': () => App.view.zoom(1.25),
-    '-': () => App.view.zoom(0.8),
+    '+': () => App.view.zoom(ZOOM_IN),
+    '=': () => App.view.zoom(ZOOM_IN),
+    '-': () => App.view.zoom(ZOOM_OUT),
     'd': () => App.ui.togglePref('showOverlay'),
     's': () => App.ui.togglePref('bigText'),
     'c': e => { if (!e.ctrlKey && !e.metaKey) copyReadout(); else return false; },
@@ -28,8 +30,8 @@
     'F2': () => App.ui.startRename(),
     'm': () => App.ui.openMerge(),
     'Escape': () => App.view.setMode(null),
-    '?': () => $('#help').showModal(),
-    'F1': () => $('#help').showModal(),
+    '?': showHelp,
+    'F1': showHelp,
   };
   // Arrow step in image px: plain 1, Shift 10, Alt 0.25 (sub-pixel)
   const step = e => (e.shiftKey ? 10 : e.altKey ? 0.25 : 1);
@@ -104,13 +106,13 @@
     click('[data-act="demo"]', () => App.loaders.loadDemo());
     click('[data-act="export"]', exportSession);
     click('[data-act="clear"]', () => { if (confirm('Remove all images from this session?')) App.docs.clear(); });
-    click('[data-act="help"]', () => $('#help').showModal());
+    click('[data-act="help"]', showHelp);
     click('[data-act="copy"]', copyReadout);
     click('[data-act="periods"]', () => App.view.togglePeriods());
     click('[data-act="fit"]', () => App.view.fit());
     click('[data-act="fit-grid"]', () => App.view.fitGrid());
-    click('[data-act="zoom-in"]', () => App.view.zoom(1.25));
-    click('[data-act="zoom-out"]', () => App.view.zoom(0.8));
+    click('[data-act="zoom-in"]', () => App.view.zoom(ZOOM_IN));
+    click('[data-act="zoom-out"]', () => App.view.zoom(ZOOM_OUT));
     click('#tgl-overlay', () => App.ui.togglePref('showOverlay'));
     click('#tgl-bigtext', () => App.ui.togglePref('bigText'));
     click('#btn-copyimg', copyImage);

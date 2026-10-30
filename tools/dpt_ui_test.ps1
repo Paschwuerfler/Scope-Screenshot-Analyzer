@@ -82,16 +82,36 @@ try {
   Invoke-CdpJs $sess "($addJs)('NOR45A24_Rg22_24V')" | Out-Null
   Wait-Cdp $sess 'document.querySelector("#batch-dlg").open' 30
   $p = Invoke-CdpJs $sess $paramsJs
+  $w = Invoke-CdpJs $sess 'document.getElementById("bd-warn").hidden ? "" : document.getElementById("bd-warn").textContent'
+  Check 'no import warning (same sample rate, no clipping)' ($w -eq '') $w
   Check 'params carried over + folder name' ($p -eq '["Rg","22","Vdc","24 V","V","24 V"]') $p
   Invoke-CdpJs $sess 'document.querySelectorAll("#bd-params [data-bd=del-param]")[2].click(); true' | Out-Null
   Invoke-CdpJs $sess 'document.querySelector("[data-bd=ok]").click()' | Out-Null
   Wait-Cdp $sess 'App.dpt.pool.shots.length === 42' 30
-  Set-Select $sess 'sel-group' 'Rg'
+  $setGroupJs = @'
+((i, v) => { const s = document.querySelector(`#sel-groups [data-gi="${i}"]`); s.value = v; s.dispatchEvent(new Event('change', { bubbles: true })); document.activeElement.blur(); return true; })
+'@
+  while ((Invoke-CdpJs $sess 'App.dpt.ui.prefs.groups.length') -gt 0) { Invoke-CdpJs $sess "($setGroupJs)(0, '')" | Out-Null }
+  Invoke-CdpJs $sess "($setGroupJs)(0, 'Rg')" | Out-Null
   $n = Invoke-CdpJs $sess 'App.dpt.ui.debug().trend.length'
   Check 'trend has 40 points' ($n -eq 40) "$n"
   $keys = Invoke-CdpJs $sess 'App.dpt.pool.paramKeys().map(k => k.key).join(",")'
-  Check 'param keys' ($keys -eq 'I,I_edge,Folder,Rg,Vdc') $keys
+  Check 'param keys' ($keys -eq 'I,Folder,Rg,Vdc') $keys
   Shot $sess 'dpt_two_groups.png'
+
+  # --- group by two keys: Rg + Folder -> one line per pair, labels name both
+  Invoke-CdpJs $sess "($setGroupJs)(1, 'Folder')" | Out-Null
+  $g = Invoke-CdpJs $sess 'App.dpt.ui.debug().groups.map(c => c.split(String.fromCharCode(183)).map(s => s.trim()).join("+")).join("|")'
+  Check 'group by Rg + Folder' ($g -eq 'Rg = 10+Folder = NOR45A24_Rg10_24V|Rg = 22+Folder = NOR45A24_Rg22_24V') $g
+  $s = Invoke-CdpJs $sess '[...document.querySelectorAll("#sel-groups select")].map(s => s.value).join(",")'
+  Check 'group selects Rg, Folder, + empty' ($s -eq 'Rg,Folder,') $s
+  Invoke-CdpJs $sess "($setGroupJs)(1, '')" | Out-Null
+  Check 'removing the second key' ((Invoke-CdpJs $sess 'App.dpt.ui.prefs.groups.join(",")') -eq 'Rg')
+
+  # --- ringing frequency: Y metric and table column right after ringing pk-pk
+  Set-Select $sess 'sel-metric' 'fRing'
+  $rf = Invoke-CdpJs $sess 'JSON.stringify({ pts: App.dpt.ui.debug().trend.length, cols: [...document.querySelectorAll("#tbl th")].map(t => t.dataset.col).join(",") })' | ConvertFrom-Json
+  Check 'ringing frequency plotted and listed before the levels' (($rf.pts -gt 0) -and ($rf.cols -match 'ringPP,fRing,swing,base,top')) "$($rf.pts) pts; $($rf.cols)"
 
   # --- falling edge, ringing metric, log X
   Send-CdpKey $sess 'e' 'KeyE' 69
@@ -146,7 +166,7 @@ try {
     $lbl = Invoke-CdpJs $sess "JSON.stringify(App.dpt.app.scopeLabel(App.dpt.pool.shots.find(s => s.id === '$($row[2])')))" | ConvertFrom-Json
     $sn = Invoke-CdpJs $scope 'JSON.stringify({ name: App.docs.active().name, notes: document.getElementById("doc-notes").value })' | ConvertFrom-Json
     Check 'name = values only (shot, Rg, Vdc, I)' ($sn.name -match "^$($row[3]) \u00b7 (10|22) \u00b7 24 V \u00b7 [\d.]+ A \(NOR45A24_Rg(10|22)_24V\)$") $sn.name
-    Check 'notes list parameters and I shot' (($sn.notes -eq $lbl.notes) -and ($sn.notes -match 'Rg = (10|22)') -and ($sn.notes -match 'Vdc = 24 V') -and ($sn.notes -match 'I shot = [\d.]+ A')) ($sn.notes -replace "`n", ' | ')
+    Check 'notes list parameters and I' (($sn.notes -eq $lbl.notes) -and ($sn.notes -match 'Rg = (10|22)') -and ($sn.notes -match 'Vdc = 24 V') -and ($sn.notes -match 'I = [\d.]+ A')) ($sn.notes -replace "`n", ' | ')
     $d = Invoke-CdpJs $scope '(() => { const d = App.docs.active(), s = d.series, t = x => s.t0 + x * s.dt; return JSON.stringify({ ch: s.cols.map(c => c.id + c.unit).join(","), n: App.docs.list().length, c1: t(d.cursors.x1), c2: t(d.cursors.x2), a: t(d.view.xa), b: t(d.view.xb) }); })()'
     $o = $d | ConvertFrom-Json
     Check 'shot opened in analyzer (C1 V + C3 A)' ($o.ch -eq 'C1V,C3A' -and $o.n -eq 1) $d
@@ -195,7 +215,7 @@ try {
   Invoke-Cdp $sess 'Page.reload' @{} | Out-Null
   Start-Sleep -Milliseconds 500
   Wait-Cdp $sess 'document.body.dataset.ready === "1" && App.dpt.pool.shots.length === 42' 30
-  $st = Invoke-CdpJs $sess 'JSON.stringify({ edge: App.dpt.ui.prefs.edge, metric: App.dpt.ui.prefs.metric, group: App.dpt.ui.prefs.group, pts: App.dpt.ui.debug().trend.length, hidden: App.dpt.pool.shots.filter(s => s.hidden).length })'
+  $st = Invoke-CdpJs $sess 'JSON.stringify({ edge: App.dpt.ui.prefs.edge, metric: App.dpt.ui.prefs.metric, group: App.dpt.ui.prefs.groups.join(), pts: App.dpt.ui.debug().trend.length, hidden: App.dpt.pool.shots.filter(s => s.hidden).length })'
   Check 'reload restores pool and view' ($st -eq '{"edge":"fall1","metric":"ringPP","group":"Rg","pts":20,"hidden":21}') $st
   Shot $sess 'dpt_reloaded.png'
 } finally { Stop-CdpSession $sess }

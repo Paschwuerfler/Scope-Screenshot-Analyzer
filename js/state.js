@@ -6,16 +6,17 @@
 //     calib, status, notes, raw,        // see js/calibrate.js; status values 'ok'|'warn'|'manual'
 //     chNames: { C1: 'Vout', ... },     // optional custom channel names (App.calib.chLabel)
 //     axisCh,                           // series: channel labelling the y axis (App.series.axisChannel)
-//     cursors: { x1, x2, sel, periods }, // cursor x positions in image px, sel = 1|2 (keyboard target),
-//                                       // periods = multi-period mode {p0, x1} or null (js/measure.js)
+//     cursors: { x1, x2, sel, periods, probe }, // cursor x positions in image px, sel = 1|2 (keyboard target),
+//                                       // periods = multi-period mode {p0, x1} or null (js/measure.js),
+//                                       // probe = ids of the channels the cursors read (App.measure.probedChannels)
 //     userNotes,                        // free text typed by the user (Notes card), '' if none
 //     parts }                           // merged views only (blob = null): [{ name, blob, shift, map }],
 //                                       // see addMerged / App.series.combine
 // and runtime-only fields (rebuilt on load, never saved):
-//   { bitmap, imgData, traces, thumbUrl }  or for series { series, thumbUrl } (+ partData for merged views)
+//   { bitmap, imgData, traces, thumbUrl, view }  or for series { series, thumbUrl, view } (+ partData for merged views)
 //
-// Modules never mutate docs silently: call App.docs.update(doc, changes) or
-// App.docs.touch(doc) afterwards so views re-render and the doc is saved.
+// Modules never mutate docs silently: call App.docs.touch(doc, what) afterwards so views
+// re-render, traces are re-extracted if needed and the doc is saved.
 App.store = (() => {
   const DB_NAME = 'scope-screenshot-analyzer', DB_VERSION = 1;
   let dbp = null;
@@ -157,32 +158,34 @@ App.docs = (() => {
     return { x1: g.left + w * 0.4, x2: g.left + w * 0.6, sel: 1 };
   }
 
-  /** Add an image (Blob/File). Returns the doc. */
-  async function addImage(blob, name) {
-    const { bitmap, imgData } = await decode(blob);
-    const doc = { id: App.util.uid(), name: name || 'image', kind: 'image', blob, width: bitmap.width, height: bitmap.height, addedAt: Date.now(), bitmap, imgData };
-    analyze(doc);
-    retrace(doc);
-    doc.cursors = defaultCursors(doc);
-    doc.thumbUrl = URL.createObjectURL(blob);
+  /** Append a new doc to the session and save it. Returns the doc. */
+  function append(doc, thumbUrl) {
+    doc.thumbUrl = thumbUrl;
     docs.push(doc);
     save(doc);
     App.events.emit('docs-changed');
     return doc;
   }
+  /** New doc: detect / auto scale, extract traces, default cursors. */
+  function prepare(doc) {
+    analyze(doc);
+    retrace(doc);
+    doc.cursors = defaultCursors(doc);
+    return doc;
+  }
+
+  /** Add an image (Blob/File). Returns the doc. */
+  async function addImage(blob, name) {
+    const { bitmap, imgData } = await decode(blob);
+    const doc = prepare({ id: App.util.uid(), name: name || 'image', kind: 'image', blob, width: bitmap.width, height: bitmap.height, addedAt: Date.now(), bitmap, imgData });
+    return append(doc, URL.createObjectURL(blob));
+  }
 
   /** Add a time-series file (CSV text as Blob/File). Returns the doc. */
   async function addSeries(blob, name) {
     const series = App.series.parse(await App.series.readText(blob));
-    const doc = { id: App.util.uid(), name: name || 'data.csv', kind: 'series', blob, width: series.n, height: App.series.VH, addedAt: Date.now(), series, chNames: App.series.autoNames(series) };
-    analyze(doc);
-    retrace(doc);
-    doc.cursors = defaultCursors(doc);
-    doc.thumbUrl = await App.series.thumbnail(doc);
-    docs.push(doc);
-    save(doc);
-    App.events.emit('docs-changed');
-    return doc;
+    const doc = prepare({ id: App.util.uid(), name: name || 'data.csv', kind: 'series', blob, width: series.n, height: App.series.VH, addedAt: Date.now(), series, chNames: App.series.autoNames(series) });
+    return append(doc, await App.series.thumbnail(doc));
   }
 
   /**
@@ -266,7 +269,7 @@ App.docs = (() => {
     if (i < 0) return;
     const [d] = docs.splice(i, 1);
     if (d.thumbUrl) URL.revokeObjectURL(d.thumbUrl);
-    if (activeId === id) activeId = docs[Math.min(i, docs.length - 1)] ? docs[Math.min(i, docs.length - 1)].id : null;
+    if (activeId === id) { const next = docs[Math.min(i, docs.length - 1)]; activeId = next ? next.id : null; }
     try { await App.store.deleteDoc(id); } catch (e) { reportPersistError(e); }
     save(null);
     App.events.emit('docs-changed');
@@ -312,7 +315,8 @@ App.docs = (() => {
     // -> { url, note } (note: 16-bit error text, if newly packed)
     const encode = async (blob, series, channels, name) => {
       let note = null;
-      if (series && want && App.series.packedEnc(blob) !== want && App.series.packedEnc(blob) !== 'q16') {
+      const enc = App.series.packedEnc(blob);
+      if (series && want && enc !== want && enc !== 'q16') {
         const p = await App.series.pack(series, want, channels);
         blob = p.blob; note = p.note;
         if (note) lossy.push({ name, note });
@@ -355,5 +359,5 @@ App.docs = (() => {
     if (first) setActive(first.id);
   }
 
-  return { list, get, active, setActive, step, addImage, addSeries, addMerged, remerge, blobsOf, restore, remove, rename, clear, touch, analyze, exportSession, importSession, isPersistent: () => persistenceOk };
+  return { list, get, active, setActive, step, addImage, addSeries, addMerged, remerge, blobsOf, restore, remove, rename, clear, touch, analyze, exportSession, importSession };
 })();

@@ -18,9 +18,9 @@ function Start-CdpSession([string]$page, [int]$Width = 1600, [int]$Height = 950,
   $root = Split-Path $PSScriptRoot -Parent
   $path, $query = $page -split '\?', 2
   $url = 'file:///' + ((Resolve-Path (Join-Path $root $path)).Path -replace '\\', '/') + $(if ($query) { "?$query" } else { '' })
-  $profile = Join-Path $env:TEMP ("scope-cdp-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+  $userDir = Join-Path $env:TEMP ("scope-cdp-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
   $proc = Start-Process $browser -PassThru -ArgumentList @('--headless=new', '--disable-gpu', '--allow-file-access-from-files',
-    "--remote-debugging-port=$Port", "--user-data-dir=$profile", "--window-size=$Width,$Height", '--hide-scrollbars', 'about:blank')
+    "--remote-debugging-port=$Port", "--user-data-dir=$userDir", "--window-size=$Width,$Height", '--hide-scrollbars', 'about:blank')
   $targets = $null
   for ($i = 0; $i -lt 50 -and -not $targets; $i++) {
     Start-Sleep -Milliseconds 200
@@ -31,7 +31,7 @@ function Start-CdpSession([string]$page, [int]$Width = 1600, [int]$Height = 950,
   $ws = New-Object System.Net.WebSockets.ClientWebSocket
   $ws.Options.KeepAliveInterval = [TimeSpan]::FromSeconds(30)
   $ws.ConnectAsync([Uri]$t.webSocketDebuggerUrl, [Threading.CancellationToken]::None).Wait()
-  $s = [pscustomobject]@{ Ws = $ws; Proc = $proc; Id = 0; Profile = $profile; Port = $Port }
+  $s = [pscustomobject]@{ Ws = $ws; Proc = $proc; Id = 0; Profile = $userDir; Port = $Port }
   Invoke-Cdp $s 'Emulation.setDeviceMetricsOverride' @{ width = $Width; height = $Height; deviceScaleFactor = 1; mobile = $false } | Out-Null
   Invoke-Cdp $s 'Page.navigate' @{ url = $url } | Out-Null
   return $s

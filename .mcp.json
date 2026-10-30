@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "cmd",
+      "args": [
+        "/c", "npx", "-y", "@playwright/mcp@0.0.83",
+        "--browser", "msedge",
+        "--headless",
+        "--isolated",
+        "--allow-unrestricted-file-access",
+        "--viewport-size", "1600x1000"
+      ]
+    }
+  }
+}

@@ -9,17 +9,17 @@ App.util = (() => {
     [1e-3, 'm'], [1e-6, 'µ'], [1e-9, 'n'], [1e-12, 'p'], [1e-15, 'f'],
   ];
   const PREFIX_VALUE = { G: 1e9, M: 1e6, k: 1e3, K: 1e3, '': 1, m: 1e-3, u: 1e-6, 'µ': 1e-6, 'μ': 1e-6, n: 1e-9, p: 1e-12, f: 1e-15 };
+  /** [multiplier, prefix] for a magnitude (values just below a step round up into it). */
+  const prefixFor = abs => PREFIXES.find(p => abs >= p[0] * 0.9995) || PREFIXES[PREFIXES.length - 1];
 
   /** Format a number in engineering notation, e.g. formatSI(2.1e-9, 's') -> "2.1 ns". */
   function formatSI(value, unit = '', digits = 4) {
     if (value === null || value === undefined || !isFinite(value)) return '–';
     if (value === 0) return `0 ${unit}`.trim();
-    const abs = Math.abs(value);
-    let [mult, pre] = PREFIXES[PREFIXES.length - 1];
-    for (const p of PREFIXES) { if (abs >= p[0] * 0.9995) { [mult, pre] = p; break; } }
+    const [mult, pre] = prefixFor(Math.abs(value));
     const scaled = value / mult;
     // toPrecision then strip trailing zeros: 2.100 -> 2.1
-    let s = Number(scaled.toPrecision(digits)).toString();
+    const s = Number(scaled.toPrecision(digits)).toString();
     return `${s} ${pre}${unit}`.trim();
   }
 
@@ -27,8 +27,7 @@ App.util = (() => {
   function formatRange(lo, hi, unit = '', digits = 3) {
     if (!isFinite(lo) || !isFinite(hi)) return '–';
     const abs = Math.max(Math.abs(lo), Math.abs(hi)) || 1;
-    let [mult, pre] = PREFIXES[PREFIXES.length - 1];
-    for (const p of PREFIXES) { if (abs >= p[0] * 0.9995) { [mult, pre] = p; break; } }
+    const [mult, pre] = prefixFor(abs);
     const dec = Math.max(0, digits - 1 - Math.floor(Math.log10(abs / mult)));
     return `${(lo / mult).toFixed(dec)} … ${(hi / mult).toFixed(dec)} ${pre}${unit}`;
   }
@@ -55,8 +54,8 @@ App.util = (() => {
     const s = String(str).trim().replace(/,/g, '.').replace(/\s+/g, ' ');
     const m = s.match(/^([-+−]?\d*\.?\d+(?:e[-+]?\d+)?)\s*([GMkKmuµμnpf]?)\s*([a-zA-Z]*)\s*\/?\s*(?:div)?$/);
     if (!m) return null;
-    let num = parseFloat(m[1].replace('−', '-'));
-    let pre = m[2];
+    const num = parseFloat(m[1].replace('−', '-'));
+    const pre = m[2];
     let unit = m[3];
     // "m" alone with an expected unit means milli (e.g. user typed "5m" for 5 ms)
     if (!unit && expectUnit) unit = expectUnit;

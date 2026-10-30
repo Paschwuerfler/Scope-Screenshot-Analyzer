@@ -8,21 +8,35 @@ App.dpt.edges = (() => {
   const DEFAULTS = {
     ringWindow: 50e-9,   // search the first oscillation within this time after t50
     dvdtWindow: 2e-9,    // least-squares slope over this span for peak dv/dt
-    curWindow: 20e-9,    // edge current = mean of the current channel over this time before t50
   };
 
   /** Noise sigma from sample-to-sample differences (robust), at least half a quantisation step. */
   function noiseSigma(v) {
-    const d = [];
+    const d = new Float64Array(Math.max(0, v.length - 1));
     let lsb = Infinity;
     for (let i = 1; i < v.length; i++) {
       const a = Math.abs(v[i] - v[i - 1]);
-      d.push(a);
+      d[i - 1] = a;
       if (a > 0 && a < lsb) lsb = a;
     }
-    d.sort((a, b) => a - b);
+    d.sort();
     const mad = d[d.length >> 1] || 0;
     return Math.max(1.4826 * mad / Math.SQRT2, isFinite(lsb) ? lsb / 2 : 0);
+  }
+
+  /**
+   * Clipping: the scope writes the ADC limit, so the record sits flat on its extreme for a while;
+   * a noisy real waveform does not repeat its extreme value 8 samples in a row.
+   */
+  function isClipped(v) {
+    let vmin = Infinity, vmax = -Infinity;
+    for (let i = 0; i < v.length; i++) { if (v[i] < vmin) vmin = v[i]; if (v[i] > vmax) vmax = v[i]; }
+    let runMax = 0, runMin = 0, rMax = 0, rMin = 0;
+    for (let i = 0; i < v.length; i++) {
+      rMax = v[i] === vmax ? rMax + 1 : 0; rMin = v[i] === vmin ? rMin + 1 : 0;
+      if (rMax > runMax) runMax = rMax; if (rMin > runMin) runMin = rMin;
+    }
+    return vmax > vmin && (runMax >= 8 || runMin >= 8);
   }
 
   /** 3-sample moving average (endpoints copied). Takes the edge off quantisation noise for peak search. */
@@ -37,7 +51,8 @@ App.dpt.edges = (() => {
   function medianOf(v, a, b) {
     a = Math.max(0, Math.floor(a)); b = Math.min(v.length - 1, Math.ceil(b));
     if (b < a) return NaN;
-    return App.util.median(Array.from(v.subarray ? v.subarray(a, b + 1) : v.slice(a, b + 1)));
+    const s = Float64Array.from(v.subarray ? v.subarray(a, b + 1) : v.slice(a, b + 1)).sort(), m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
   }
 
   function mean(v, a = 0, b = v.length - 1) {
@@ -71,6 +86,44 @@ App.dpt.edges = (() => {
     return { edges, lo, hi };
   }
 
+  /** Position of an extreme at j: parabolic vertex, or the middle of a flat top (quantised data). */
+  function vertex(y, j) {
+    let a = j, b = j;
+    while (a > 0 && y[a - 1] === y[j]) a--;
+    while (b < y.length - 1 && y[b + 1] === y[j]) b++;
+    if (a !== b || !j || j === y.length - 1) return (a + b) / 2;
+    const d = y[j - 1] - 2 * y[j] + y[j + 1];
+    return d ? j + 0.5 * (y[j - 1] - y[j + 1]) / d : j;
+  }
+
+  /**
+   * Ringing frequency from alternating extrema (each confirmed by a reversal of more than hys; the
+   * caller has already confirmed the first oscillation with a stricter threshold), starting at the
+   * first peak j0 (dir-normalised). Periods are taken peak to peak and valley to valley: ringing
+   * that rides on a slowly settling level has unequal half-cycles (up to ~3:1 seen on real shots).
+   * The first period must be at most 4x its first half, else the later extrema are level drift, not
+   * ringing. The scan stops at jEnd, after 9 extrema, or when a period differs from the first by more
+   * than 30 %; it ends on a peak so the span is whole periods. Needs one full period.
+   */
+  function ringFreq(s, j0, jEnd, dir, hys, dt) {
+    const y = dir < 0 ? Float32Array.from(s, x => -x) : s;
+    const ext = [vertex(y, j0)];
+    let sign = -1, run = y[j0], jr = j0;   // sign -1: looking for a valley next
+    for (let j = j0 + 1; j <= jEnd && ext.length < 9; j++) {
+      const d = sign * (y[j] - run);
+      if (d > 0) { run = y[j]; jr = j; continue; }
+      if (-d <= hys) continue;
+      const x = vertex(y, jr), k = ext.length;
+      if (k === 2 && x - ext[0] > 4 * (ext[1] - ext[0])) break;
+      if (k >= 3 && Math.abs(x - ext[k - 2] - (ext[2] - ext[0])) > 0.3 * (ext[2] - ext[0])) break;
+      ext.push(x);
+      sign = -sign; run = y[j]; jr = j;
+    }
+    if (ext.length % 2 === 0) ext.pop();
+    if (ext.length < 3) return null;
+    return (ext.length - 1) / (2 * (ext[ext.length - 1] - ext[0]) * dt);
+  }
+
   /** Time (fractional sample index) where v crosses level L, scanning from i in direction step. */
   function crossing(v, L, i, step, dir, limA, limB) {
     // dir = +1: rising through L. Scanning backwards we look for the last sample below L,
@@ -86,25 +139,18 @@ App.dpt.edges = (() => {
 
   /**
    * Analyse one shot. sw = switch-node waveform, cur = current waveform (or null).
-   * Returns { edges: [...], sigma, iMean, warn: [..reasons] }; each edge:
+   * Returns { edges: [...], sigma, iMean, clipped: { sw, cur }, warn: [..reasons] }; each edge:
    * { kind: 'rise'|'fall', n (1-based per kind), t50, base, top, swing, t10, t90, t20, t80,
-   *   slew1090, slew2080, trise, dvdtMax, overshoot, overshootPct, ringPP, tRing, iEdge, warn: [] }
+   *   slew1090, slew2080, trise, dvdtMax, overshoot, overshootPct, ringPP, tRing, fRing, warn: [] }
    * Slew rates and dv/dt are magnitudes (V/s), times absolute (s, scope time base).
    */
   function analyze(sw, cur, opts = {}) {
     const o = Object.assign({}, DEFAULTS, opts);
     const v = sw.v, n = v.length, dt = sw.dt, tOf = x => sw.t0 + x * dt;
-    const out = { edges: [], sigma: noiseSigma(v), iMean: cur ? mean(cur.v) : null, warn: [] };
-    // clipping: the scope writes the ADC limit, so the record sits flat on its extreme for a
-    // while; a noisy real waveform does not repeat its extreme value many samples in a row
-    let vmin = Infinity, vmax = -Infinity;
-    for (let i = 0; i < n; i++) { if (v[i] < vmin) vmin = v[i]; if (v[i] > vmax) vmax = v[i]; }
-    let runMax = 0, runMin = 0, rMax = 0, rMin = 0;
-    for (let i = 0; i < n; i++) {
-      rMax = v[i] === vmax ? rMax + 1 : 0; rMin = v[i] === vmin ? rMin + 1 : 0;
-      if (rMax > runMax) runMax = rMax; if (rMin > runMin) runMin = rMin;
-    }
-    if (vmax > vmin && (runMax >= 8 || runMin >= 8)) out.warn.push('possibly clipped (flat at the record limit)');
+    const out = { edges: [], sigma: noiseSigma(v), iMean: cur ? mean(cur.v) : null, warn: [],
+      clipped: { sw: isClipped(v), cur: !!cur && isClipped(cur.v) } };
+    if (out.clipped.sw) out.warn.push('possibly clipped (flat at the record limit)');
+    if (out.clipped.cur) out.warn.push('current possibly clipped (flat at the record limit)');
 
     const s = smooth3(v);
     const found = findEdges(s, out.sigma);
@@ -162,7 +208,7 @@ App.dpt.edges = (() => {
       // hys), then the following opposite extreme; ringPP = their difference
       const hys = Math.max(5 * sigS, 0.02 * sw2);
       let runMax = -Infinity, jMax = -1, runMin = Infinity, phase = 0;
-      e.ringPP = 0; e.tRing = null;
+      e.ringPP = 0; e.tRing = null; e.fRing = null;
       for (let j = i50; j <= iw; j++) {
         const y = dir * s[j];
         if (phase === 0) {
@@ -173,15 +219,14 @@ App.dpt.edges = (() => {
           else if (y > runMin + hys) break;
         }
       }
-      if (phase === 1) { e.ringPP = runMax - runMin; e.tRing = tOf(jMax); }
-      if (cur && cur.v.length) {
-        const c0 = (e.t50 - o.curWindow - cur.t0) / cur.dt, c1 = (e.t50 - cur.t0) / cur.dt;
-        e.iEdge = c1 >= 0 && c0 <= cur.v.length - 1 ? mean(cur.v, c0, c1) : null;
-      } else e.iEdge = null;
+      if (phase === 1) {
+        e.ringPP = runMax - runMin; e.tRing = tOf(jMax);
+        e.fRing = ringFreq(s, jMax, b - 1, dir, Math.max(5 * sigS, 0.01 * sw2), dt);
+      }
       out.edges.push(e);
     }
     return out;
   }
 
-  return { DEFAULTS, analyze, noiseSigma, findEdges };
+  return { DEFAULTS, analyze, noiseSigma, findEdges, isClipped };
 })();

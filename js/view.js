@@ -13,9 +13,12 @@ App.view = (() => {
   const CURSOR_COLORS = { 1: '#22d3ee', 2: '#f472b6' };
   const PERIOD_COLOR = '#e5e7eb';   // multi-period marks
   const HIT_PX = 8;
+  const LABEL_BG = 'rgba(0,0,0,0.75)';   // backdrop of text drawn over the plot
+  const MIN_WINDOW = 8;                  // series: narrowest visible window (samples)
   let canvas, ctx, dpr = 1;
   let mode = null;            // null | {type:'pick-zero', ch} | {type:'pick-grid'}
-  let drag = null;            // {type:'cursor', n} | {type:'pan', sx, sy, ox, oy} | {type:'grid', ix0, iy0, ix1, iy1} | {type:'shift', part, sx, s0, spp}
+  let drag = null;            // {type:'cursor', n} | {type:'pan', sx, sy, ox, oy, xa, xb, kx} | {type:'grid', ix0, iy0, ix1, iy1}
+                              // | {type:'offset', ch, sy, z0} | {type:'shift', part, sx, s0, spp}
   let hover = null;           // {ix, iy}
   let hoverHandle = null;     // series: channel id whose 0-level handle is under the pointer (tooltip)
 
@@ -47,7 +50,7 @@ App.view = (() => {
   }
   /** Keep the window inside the data and at least a few samples wide. */
   function clampWindow(d, w) {
-    const n = d.width - 1, minW = Math.min(n, 8);
+    const n = d.width - 1, minW = Math.min(n, MIN_WINDOW);
     let xa = w.xa, xb = w.xb;
     if (!(xb - xa >= minW)) { const c = (xa + xb) / 2; xa = c - minW / 2; xb = c + minW / 2; }
     if (xb - xa > n) { xa = 0; xb = n; }
@@ -70,6 +73,7 @@ App.view = (() => {
   }
   const toScreen = (v, ix, iy) => [v.ox + ix * (v.kx || v.scale), v.oy + iy * (v.ky || v.scale)];
   const toImage = (v, sx, sy) => [(sx - v.ox) / (v.kx || v.scale), (sy - v.oy) / (v.ky || v.scale)];
+  const cursorX = (d, n) => (n === 1 ? d.cursors.x1 : d.cursors.x2);
 
   // ---------------------------------------------------------------- setup
   function init(el) {
@@ -197,9 +201,9 @@ App.view = (() => {
     const item = (txt, col) => {
       const w = ctx.measureText(txt).width + 10 * f;
       if (lx > x0 + 6 && lx + w > x1 - 4) { lx = x0 + 6; ly += 19 * f; }
-      ctx.fillStyle = 'rgba(0,0,0,0.75)'; roundRect(lx - 3, ly, w, 17 * f, 3); ctx.fill(); ctx.fillStyle = col; ctx.fillText(txt, lx + 2 * f, ly + 9 * f); lx += w + 4;
+      pill(lx - 3, ly, w, 17 * f, 3); ctx.fillStyle = col; ctx.fillText(txt, lx + 2 * f, ly + 9 * f); lx += w + 4;
     };
-    item(d.parts ? `${fmt(tdiv, 's', 3)}/div` : `${fmt(tdiv, 's', 3)}/div · ${fmt(1 / s.dt, 'Sa/s', 4)}`, '#e5e7eb');
+    item(d.parts ? `${fmt(tdiv, 's', 3)}/div` : `${fmt(tdiv, 's', 3)}/div · ${App.series.rateText(s)}`, '#e5e7eb');
     for (const col of s.cols) {
       const cc = c.channels[col.id];
       if (cc && cc.on) item(`${App.calib.chLabel(d, col.id)} ${fmt(cc.vdiv, cc.unit, 3)}/div`, App.calib.channelById(col.id).color);
@@ -213,7 +217,7 @@ App.view = (() => {
         const iy = g.top + (g.bottom - g.top) * k / g.vdiv, sy = toScreen(v, 0, iy)[1];
         if (sy - 8 * f < ly + 17 * f + 2) continue;   // under the legend
         const txt = fmt(snap0(App.calib.vAt(c, ax, iy), ac.vdiv), ac.unit, 3), w = ctx.measureText(txt).width + 8 * f;
-        ctx.fillStyle = 'rgba(0,0,0,0.75)'; roundRect(x0 + 3, sy - 8 * f, w, 16 * f, 3); ctx.fill();
+        pill(x0 + 3, sy - 8 * f, w, 16 * f, 3);
         ctx.fillStyle = App.calib.channelById(ax).color; ctx.fillText(txt, x0 + 3 + 4 * f, sy + 0.5);
       }
     }
@@ -308,12 +312,10 @@ App.view = (() => {
         ctx.moveTo(sx, sa); ctx.lineTo(sx, sb);
       }
       ctx.stroke(); ctx.globalAlpha = 1;
-      ctx.strokeStyle = '#000'; ctx.lineWidth = 3.5; path(tr, v); ctx.stroke();
-      ctx.strokeStyle = ch.color; ctx.lineWidth = 1.5; path(tr, v); ctx.stroke();
+      strokeTrace(tr, v, ch.color);
       if (tr.alt) {   // second branch of a split persistence trace: dashed
         ctx.setLineDash([5, 3]);
-        ctx.strokeStyle = '#000'; ctx.lineWidth = 3.5; path(tr.alt, v); ctx.stroke();
-        ctx.strokeStyle = ch.color; ctx.lineWidth = 1.5; path(tr.alt, v); ctx.stroke();
+        strokeTrace(tr.alt, v, ch.color);
         ctx.setLineDash([]);
       }
     }
@@ -323,9 +325,14 @@ App.view = (() => {
   const snap0 = (val, perDiv) => (Math.abs(val) < Math.abs(perDiv) * 1e-6 ? 0 : val);
   function label(txt, x, y, color) {
     const w = ctx.measureText(txt).width + 6, h = 14 * F();
-    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillStyle = LABEL_BG;
     ctx.fillRect(x - 2, ctx.textBaseline === 'bottom' ? y - h + 1 : y - 1, w, h);
     ctx.fillStyle = color; ctx.fillText(txt, x + 1, y);
+  }
+  /** Extracted curve with a black outline, so it stays visible on any background. */
+  function strokeTrace(tr, v, color) {
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 3.5; path(tr, v); ctx.stroke();
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5; path(tr, v); ctx.stroke();
   }
   function path(tr, v) {
     ctx.beginPath();
@@ -356,14 +363,13 @@ App.view = (() => {
       ctx.textAlign = 'center';
       marks.forEach((ix, k) => {
         const [sx] = toScreen(v, ix, 0), txt = String(k + 1), w = ctx.measureText(txt).width + 8 * f;
-        ctx.fillStyle = 'rgba(0,0,0,0.75)'; roundRect(sx - w / 2, gy0 + 3, w, 16 * f, 3); ctx.fill();
+        pill(sx - w / 2, gy0 + 3, w, 16 * f, 3);
         ctx.fillStyle = PERIOD_COLOR; ctx.fillText(txt, sx, gy0 + 3.5 + 8 * f);
       });
       ctx.textAlign = 'left';
     }
     for (const n of [1, 2]) {
-      const ix = n === 1 ? cur.x1 : cur.x2;
-      const [sx] = toScreen(v, ix, 0);
+      const [sx] = toScreen(v, cursorX(d, n), 0);
       const col = CURSOR_COLORS[n], selected = cur.sel === n;
       ctx.strokeStyle = col; ctx.lineWidth = selected ? 2 : 1.25;
       ctx.beginPath(); ctx.moveTo(sx, gy0); ctx.lineTo(sx, gy1); ctx.stroke();
@@ -390,7 +396,7 @@ App.view = (() => {
         ctx.beginPath(); ctx.arc(sx, sy, 4.5 * Math.sqrt(f), 0, Math.PI * 2); ctx.fill(); ctx.stroke();
         const txt = App.util.formatSI(val.v, chr.unit, 3);
         const w = ctx.measureText(txt).width + 8 * f, lx = n === 1 ? sx - w - 8 * f : sx + 8 * f;
-        ctx.fillStyle = 'rgba(0,0,0,0.75)'; roundRect(lx, sy - 9 * f, w, 18 * f, 3); ctx.fill();
+        pill(lx, sy - 9 * f, w, 18 * f, 3);
         ctx.fillStyle = c.color; ctx.fillText(txt, lx + 4 * f, sy + 0.5);
       }
     }
@@ -430,6 +436,8 @@ App.view = (() => {
     ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
     ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
   }
+  /** Filled rounded label backdrop. */
+  function pill(x, y, w, h, r) { ctx.fillStyle = LABEL_BG; roundRect(x, y, w, h, r); ctx.fill(); }
 
   // ---------------------------------------------------------------- interaction
   const evPos = e => { const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
@@ -441,7 +449,7 @@ App.view = (() => {
     if (sy < gy0 - 22 * F() - 6 || sy > gy1 + 4) return 0;
     let best = 0, bd = HIT_PX;
     for (const n of [1, 2]) {
-      const [cx] = toScreen(v, n === 1 ? d.cursors.x1 : d.cursors.x2, 0);
+      const [cx] = toScreen(v, cursorX(d, n), 0);
       const dd = Math.abs(cx - sx);
       if (dd <= bd) { bd = dd; best = n; }
     }
@@ -552,10 +560,14 @@ App.view = (() => {
     render();
   }
 
+  // wheel: px per scroll unit (line-mode wheels report lines) and the zoom factor of one event (also used by the overview bar)
+  const wheelUnit = e => (e.deltaMode === 1 ? 33 : 1);
+  const wheelZoom = e => Math.pow(1.0015, -e.deltaY * wheelUnit(e));
+
   function onWheel(e) {
     const d = doc(); if (!d) return;
     e.preventDefault();
-    const v = viewOf(d), [sx, sy] = evPos(e), unit = e.deltaMode === 1 ? 33 : 1;
+    const v = viewOf(d), [sx, sy] = evPos(e), unit = wheelUnit(e);
     // series: sideways scrolling (touchpad / Shift+wheel) pans the time axis
     const side = e.shiftKey ? e.deltaY || e.deltaX : Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : 0;
     if (v.series && side) { const dx = side * unit / v.kx; setWindow(d, v.xa + dx, v.xb + dx); return; }
@@ -568,8 +580,7 @@ App.view = (() => {
       App.docs.touch(d, 'calib');
       return;
     }
-    const f = Math.pow(1.0015, -e.deltaY * unit);
-    zoomAt(v, sx, sy, f);
+    zoomAt(v, sx, sy, wheelZoom(e));
   }
 
   /** The plot as a PNG blob (full device resolution), drawn fresh without the hover tooltip. */
@@ -618,7 +629,7 @@ App.view = (() => {
     // series zoomed out: one arrow step = one screen pixel rather than one sample
     if (d.kind === 'series') dx *= Math.max(1, 1 / viewOf(d).kx);
     const n = d.cursors.sel || 1;
-    setCursorX(d, n, (n === 1 ? d.cursors.x1 : d.cursors.x2) + dx);
+    setCursorX(d, n, cursorX(d, n) + dx);
     App.docs.touch(d, 'cursors');
   }
   /** Move cursor n to image/sample x (used by the overview bar). final = drag ended -> save. */
@@ -650,5 +661,5 @@ App.view = (() => {
     App.docs.touch(d, 'cursors');
   }
 
-  return { init, render, toBlob, fit, fitGrid, zoom, nudge, selectCursor, setMode, getMode: () => mode, getWindow, setWindow, moveCursor, togglePeriods, stepPeriods, CURSOR_COLORS };
+  return { init, render, toBlob, fit, fitGrid, zoom, nudge, selectCursor, setMode, getMode: () => mode, getWindow, setWindow, moveCursor, togglePeriods, stepPeriods, wheelZoom, CURSOR_COLORS, MIN_WINDOW };
 })();

@@ -53,7 +53,10 @@ App.dpt.app = (() => {
   const stamp = () => new Date().toISOString().slice(0, 10);
 
   async function importPool(file) {
-    try { await pool.importJson(await file.text()); ui.toast(`Imported ${file.name}`); }
+    try {
+      const warn = await pool.importJson(await file.text());
+      ui.toast(warn.length ? `Imported ${file.name}. ! ${warn.join(' · ')}` : `Imported ${file.name}`, warn.length ? 12000 : undefined);
+    }
     catch (e) { ui.toast(`Import failed: ${e.message}`); }
   }
 
@@ -94,7 +97,7 @@ App.dpt.app = (() => {
     const Itext = I === null || I === undefined ? '–' : App.util.formatSI(I, 'A', 3) + (sh.current !== null && sh.current !== undefined ? ' (entered)' : '');
     return {
       name: [sh.label, ...params.map(fmt), Itext].join(' · ') + ` (${b.name})`,
-      notes: [`DPT shot ${sh.label} · folder ${b.name}`, ...params.map(p => `${p.key} = ${fmt(p)}`), `I shot = ${Itext}`].join('\n'),
+      notes: [`DPT shot ${sh.label} · folder ${b.name}`, ...params.map(p => `${p.key} = ${fmt(p)}`), `I = ${Itext}`].join('\n'),
     };
   }
 

@@ -14,9 +14,9 @@ function Find-Browser {
 function Invoke-HeadlessPage([string]$page, [string]$elementId) {
   $ErrorActionPreference = 'Continue'   # the browser logs harmless noise to stderr
   $browser = Find-Browser
-  $profile = Join-Path $env:TEMP 'scope-analyzer-headless'
+  $userDir = Join-Path $env:TEMP 'scope-analyzer-headless'
   $url = 'file:///' + ((Resolve-Path $page).Path -replace '\\', '/')
-  $html = & $browser --headless=new --disable-gpu --allow-file-access-from-files "--user-data-dir=$profile" --virtual-time-budget=60000 --dump-dom $url 2>$null | Out-String
+  $html = & $browser --headless=new --disable-gpu --allow-file-access-from-files "--user-data-dir=$userDir" --virtual-time-budget=60000 --dump-dom $url 2>$null | Out-String
   $m = [regex]::Match($html, "<pre id=`"$elementId`"[^>]*>([\s\S]*?)</pre>")
   if (-not $m.Success) { throw "Element #$elementId not found in output" }
   return [System.Net.WebUtility]::HtmlDecode($m.Groups[1].Value)

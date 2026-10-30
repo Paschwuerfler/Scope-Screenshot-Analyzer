@@ -165,11 +165,14 @@ several folders into one **pool** and compares their switching edges.
    V = 24 V). The current of a shot can be overridden there. When you save a folder with a parameter
    that none of the folders already in the pool has, you are asked for its value in those folders
    (<kbd>Enter</kbd> fills it in, **Leave empty** / <kbd>Esc</kbd> skips).
+   A yellow box above the shot list warns when the folder was recorded at another sample rate than
+   the folders already in the pool, or when a shot's switch node or current looks clipped (the record
+   sits flat at its limit). **Import pool** shows the same checks in its message.
 3. Repeat with the next folder (e.g. the same current steps with another gate resistor). Several
    folders dropped at once open one dialog after another. **Edit** on a folder changes all of this later.
 
-The **shot current** `I` is the mean of the current channel over the whole record; `I at edge` is
-its mean over the *current window* (default 20 ns) before each edge.
+The **shot current** `I` is the mean of the current channel over the whole record (or the value
+entered for the shot).
 
 **Views** (all share hover and pins: hover a curve, point or row to highlight that shot everywhere,
 click to pin it, <kbd>Esc</kbd> to unpin):
@@ -178,7 +181,9 @@ click to pin it, <kbd>Esc</kbd> to unpin):
   ramp (dim = low, log scale when the values span more than 20×), by a text parameter = one colour
   per value. Wheel zooms the time axis, drag pans, double-click or <kbd>F</kbd> fits.
 - **Trend**: one metric (Y) against a numeric parameter (X), one line and marker shape per value of
-  *Group by* (e.g. one line per Rg). **Log X** (<kbd>L</kbd>) helps with geometric current steps.
+  *Group by* (e.g. one line per Rg). Pick a parameter in the **+** select next to it to split further:
+  *SC* + *RHR* gives one line per pair (SC = 0 · RHR = 100, SC = 0 · RHR = 200, …); *none* removes a
+  key. The legend lists the first 8 lines, and any lines after those are grey. **Log X** (<kbd>L</kbd>) helps with geometric current steps.
   Points with a yellow dot have a warning. **Repeats**: shots with the same shot name (S01, S02, …)
   and identical folder parameters, e.g. one setup measured three times into three folders, are
   drawn as one point at the mean with error bars (± σ or min–max, in Y and in the measured
@@ -189,7 +194,7 @@ click to pin it, <kbd>Esc</kbd> to unpin):
 - **Filter** (above the table, <kbd>/</kbd>): shows only matching shots in the table and both plots
   (Copy / Export CSV too); the pool list strikes the others through. Terms are separated by spaces
   and must all match: `I~10A` (around 10 A, ±10 %), `I~10A±2A`, `I~10A±20%`, `I=8..12A`, `I>5A`,
-  `I<=2A`, `~10A` (no key = shot current), `I_edge>1A`, `Rg=10`, `Vdc!=24`, `Folder=NOR45A24_Rg10_24V`,
+  `I<=2A`, `~10A` (no key = shot current), `Rg=10`, `Vdc!=24`, `Folder=NOR45A24_Rg10_24V`,
   or plain text that the folder or shot name contains. Unreadable terms turn the box red (hover it to
   see which) and are ignored. <kbd>Esc</kbd> in the box clears it. Colours keep their scale over all shots.
 
@@ -199,7 +204,7 @@ opens all pinned shots). The analyzer opens in its own tab (reused next time) wi
 CSV image (all channels), zoomed to the overlay's time window around the selected edge and with
 the cursors on its 10 % and 90 % crossings. Its name lists the values (shot, folder parameters,
 shot current), e.g. `S20 · 10 · 24 V · 32.4 A (NOR45A24_Rg10_24V)`, and its **Notes** start with
-the same values with their keys (`Rg = 10`, `Vdc = 24 V`, `I shot = 32.4 A`). Opening the same shot
+the same values with their keys (`Rg = 10`, `Vdc = 24 V`, `I = 32.4 A`). Opening the same shot
 again reuses it and keeps your notes. If nothing happens, allow pop-ups for the page.
 
 Checkboxes in the pool show / hide single shots or whole folders. **Export pool** saves raw data
@@ -216,6 +221,7 @@ current and the on-state level can settle slowly):
 | Peak dv/dt | largest least-squares slope over the *dv/dt window* (default 2 ns) between 10 % and 90 % |
 | Overshoot | furthest excursion beyond the final level within the *ringing window* (default 50 ns) after the 50 % crossing, 3-point smoothed |
 | Ringing pk-pk | first oscillation after the 50 % crossing: first peak minus the following valley (smoothed; 0 when there is no reversal larger than 2 % of the swing or 5× the noise) |
+| Ringing frequency | from the spacing of successive peaks and valleys starting at that first peak (half a period each, up to 4 periods, until the next edge or until the ringing dies out); empty when there is less than one full period |
 
 A **!** badge marks shots with no switching edge, possibly clipped data or a level that did not
 settle within the record; hover it for the reason. The windows are set in the **Analysis** box.

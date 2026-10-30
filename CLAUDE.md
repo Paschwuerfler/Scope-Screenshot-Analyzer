@@ -1,77 +1,93 @@
-# Scope Screenshot Analyzer: notes for agents
+# Scope Screenshot Analyzer: context for Claude Code
 
-Browser app (vanilla JS, **no build step, no dependencies**) for measuring on oscilloscope
-screenshots. The user opens `index.html` by double-click (file://). The user will come back with
-change requests about button placement and measurement interaction details, so keep the UI code
-easy to rearrange.
+The user does not read the code and works from two machines (this OneDrive folder + git). This file
+and the docs it imports are the shared context; auto memory does not sync, so durable knowledge goes here.
 
-Read before larger changes: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (data model, modules,
-data flow, coordinates) and [docs/EXTENDING.md](docs/EXTENDING.md) (recipes: new scope layout,
-new measurement, time-series import, UI controls). User guide: [README.md](README.md).
+## Purpose
+Offline browser tool for measuring on oscilloscope data. **`index.html` (analyzer)** loads R&S RTB2004
+screenshots, detects the screen layout, reads timebase / V/div / 0 V levels by OCR, extracts the traces and
+offers draggable cursors (Δt, ΔV, slew rate, multi-period frequency); it also loads CSV waveform exports
+(scope, LTspice) and merges them into one plot. **`dpt.html` (DPT Sweep)** collects double-pulse-test shots
+from many folders and plots slew rate, overshoot and ringing against current, gate resistor or any parameter.
+User guide: [README.md](README.md).
 
-## Hard constraints
-- **Must keep working from `file://`**: classic `<script>` tags only (no ES modules, no `fetch`
-  of local files, no workers loaded from files). New files must be added to the script list
-  in `index.html` (with the same `?v=N` cache-busting suffix as the others; bump N in all tags
-  whenever publishing to GitHub Pages) (order matters: util → ocr → calibrate → layouts → traces → series → measure →
-  state → loaders → view → overview → ui → app) and, if needed by tests, to `tools/test.html` / `tools/harvest.html`.
-  `dpt.html` (DPT sweep page) has its own list: util → series → loaders → dpt/edges → dpt/pool → dpt/plot →
-  dpt/ui → dpt/app; bump its `?v=N` together with `index.html`.
-- Everything hangs off the global `App` namespace (`App.util`, `App.ocr`, `App.calib`,
-  `App.layouts`, `App.traces`, `App.series`, `App.measure`, `App.store`, `App.docs`, `App.loaders`,
-  `App.view`, `App.ui`, `App.events`; DPT page: `App.dpt.edges/pool/plot/ui/app`). No globals besides `App` (and test-only `SAMPLES`).
-- No third-party libraries unless vendored into `lib/` with a pinned version. No CDNs (offline use).
-- Physical units internally are SI base units (s, V, Hz). Format only at display time with
-  `App.util.formatSI / formatRange / formatRate`. Parse user input with `App.util.parseSI`.
-- Persisted doc fields are listed in `PERSISTED` in `js/state.js`. If you add a field that
-  must survive reloads, add it there. Runtime caches (bitmap, imgData, traces, view) must not be.
-- After changing a doc, call `App.docs.touch(doc, what)` (`'cursors'` | `'calib'` | `'detect'` | `'notes'` = save only)
-  so that it is re-rendered, re-extracted if needed, and saved. Don't write to IndexedDB directly.
+**Direction:** the analyzer is meant to be published as a general tool. Only the RTB2004 is supported today;
+the goal is support for more scopes and, eventually, auto-detection that works on any scope's screenshot.
+Design changes so that they don't lock in RTB2004 assumptions (see "Scope-specific code" below).
+The DPT page is not meant to become a polished public tool: it ships as a demo that users adapt to their
+own setup by coding with an agent. Keep its code plain and its assumptions explicit rather than configurable.
 
-## Where to change what
-| Request | Place |
-|---|---|
-| Button placement, toolbar, panel layout | `index.html` (markup), `css/app.css` (grid: header / strip / stage / panel; widths `--strip-w`, `--panel-w`; rows below 3:2 aspect, `--panel-h`). The stage/panel splitter (`initSplitter` in `js/ui.js`) overrides `--panel-w/-h` and stores them in `App.ui.prefs` |
-| Keyboard shortcuts | `KEYS` in `js/app.js` + help table in `index.html` |
-| Cursor look, dragging, hit areas, zoom/pan, pick modes | `js/view.js` |
-| Readout table / calibration form / notes card / thumbnails / status bar | `js/ui.js` |
-| Cursor maths, future auto-measurements (slew 20–80 %, overshoot, ringing) | `js/measure.js` |
-| Trace extraction from pixels | `js/traces.js` |
-| Scope layout detection / OCR regions | `js/layouts/<scope>.js`, registry `js/layouts/index.js` |
-| OCR engine / glyphs | `js/ocr.js`; glyphs are generated, see below |
-| Loading inputs (drop, paste, pickers) | `js/loaders.js` |
-| CSV parsing, auto scale, plot drawing helpers | `js/series.js`; plot + time-only zoom in `js/view.js`, overview bar `js/overview.js` |
-| Merging CSVs into one plot (strip drag, dialog, Recordings / time shift) | `js/ui.js` (`initStripDrag`, `openMerge`, `recordingsHtml`); data: `App.series.combine`, `App.docs.addMerged/remerge`; Ctrl+drag shift in `js/view.js`. See ARCHITECTURE "Merged views" |
-| Persistence, export/import | `js/state.js` |
-| DPT sweep page: layout / controls | `dpt.html`, `css/dpt.css`, `js/dpt/ui.js` (views, dialog), `js/dpt/app.js` (actions, `KEYS`) |
-| DPT edge metrics (slew, overshoot, ringing, levels) | `js/dpt/edges.js` (pure maths, tested by `tools/dpt_test.html`) |
-| DPT pool: folder pairing, parameters, persistence | `js/dpt/pool.js` |
+## Run
+- Nothing to install, no build, no server, no port: double-click `index.html` or `dpt.html` (opens as
+  `file:///…`). Current Chrome or Edge. Works offline. Dev URLs: `index.html?demo`, `index.html?samples=N`.
+- Online copy: GitHub Pages serves `main` of github.com/Paschwuerfler/Scope-Screenshot-Analyzer
+  (https://paschwuerfler.github.io/Scope-Screenshot-Analyzer/, `?demo`, `/dpt.html`), so **pushing to `main`
+  publishes**. Before that, bump the `?v=N` suffix on every `<script>`/`<link>` in `index.html` and `dpt.html` (same N).
+- Tests: Windows PowerShell 5.1 + Edge/Chrome, nothing else. Run after every change; all must pass:
+  `powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1` · `tools\ui_test.ps1 -ShotDir <dir>` ·
+  `tools\dpt_test.ps1` · `tools\dpt_ui_test.ps1 -ShotDir <dir>` (details: @docs/TESTING.md).
+- Optional: Node ≥ 18 (tested 22.19) for the Playwright MCP server in `.mcp.json` (dev tooling only).
 
-## Verify every change
-Run from the project root in PowerShell (needs Edge or Chrome installed, nothing else):
-- `powershell -ExecutionPolicy Bypass -File tools\run_tests.ps1`: detection/calibration/trace
-  regression on all `samples/` against `tools/samples.js` (must print `ALL PASSED`).
-- `powershell -ExecutionPolicy Bypass -File tools\ui_test.ps1 -ShotDir <folder>`: drives the
-  real UI over CDP (drag, nudge, double-click, navigate, reload/restore) and saves screenshots
-  into `<folder>` so you can look at them. Extend it when you change interactions.
-- `tools\cdp.ps1` has helpers (`Start-CdpSession`, `Invoke-CdpJs`, `Send-CdpMouse`,
-  `Send-CdpKey`, `Save-CdpScreenshot`) for ad-hoc UI checks. `index.html?samples=N` replaces
-  the session with the samples and selects image N; `index.html?demo` loads the built-in demo
-  screenshot (`js/demo_image.js`, regenerate with `toolsuild_demo.ps1`).
-- DPT page: `powershell -ExecutionPolicy Bypass -File tools\dpt_test.ps1` (edge metrics, must print
-  `ALL PASSED`) and `tools\dpt_ui_test.ps1 -ShotDir <folder>` (UI over CDP with `samples/NOR45A24`).
-- If OCR glyphs or samples change: `powershell -ExecutionPolicy Bypass -File tools\build_glyphs.ps1`
-  regenerates `js/ocr_glyphs.js` (never edit that file by hand).
+## Structure
+- `index.html`, `dpt.html`: markup, help dialogs, script lists. `css/app.css` (shared), `css/dpt.css`.
+- `js/` analyzer modules, each `App.<name>`: `util` (formatting, SI parsing) · `ocr` + generated
+  `ocr_glyphs` · `calibrate` (pixel ↔ physical) · `layouts/` (`rtb2004.js`, registry) · `traces` (curve
+  extraction) · `series` (CSV parsing, packing, plot helpers; also used by DPT) · `measure` (cursor maths) ·
+  `state` (`App.docs`, IndexedDB, export/import) · `loaders` (drop/paste/pickers, DPT handoff) · `view`
+  (canvas, cursors, zoom) · `overview` (CSV overview bar) · `ui` (panels) · `app` (wiring, shortcuts).
+- `js/dpt/`: `edges` (edge metrics, pure maths) · `pool` (folders/shots, IndexedDB, import/export) · `plot`
+  (canvas helpers) · `ui` (pool list, overlay, trend, table, dialogs) · `app` (actions, shortcuts, handoff).
+- `tools/`: tests (CDP-driven), glyph and demo generators. `samples/`: ground-truth screenshots
+  (`tools/samples.js`), CSVs, DPT folder `NOR45A24/`, large pool `dpt-pool-2026-10-30.json` (perf tests).
+- `docs/ARCHITECTURE.md` (data model, data flow, coordinates, OCR, persistence) and `docs/EXTENDING.md`
+  (new scope layout, measurement, samples): read before larger changes. Change map: @docs/CHANGE_MAP.md
 
-Gotchas: PowerShell variables are case-insensitive (`$S` and `$s` are the same variable).
-Headless `--dump-dom` with `--virtual-time-budget` is unreliable for the async app, so use the CDP
-scripts. A browser profile inside the sandboxed scratch dir may have non-working IndexedDB,
-so the CDP helper uses `%TEMP%`.
+## Instruments and data
+No live connection to any instrument (no USB/serial/VISA/LAN). Inputs are files exported from the scope:
+- **Screenshots**: R&S RTB2004, 1280×824 PNG, normal and persistence display. The geometry is hard-coded in
+  `js/layouts/rtb2004.js` (graticule 39..1239 × 100..704 px, 12 × 10 div). Other scopes: manual calibration
+  in the app, or add a layout (EXTENDING.md).
+- **CSV/TXT/TSV**: first column time, up to 4 channels; headers like `C1 in V`, `C3 in A` set names and
+  units. LTspice text exports are resampled to a uniform grid; only the first `.step` run is used.
+- **DPT folders**: one file per channel `Sxx_C<n>.CSV`. The user's standard wiring is C1 = switch node,
+  C3 = current probe (the defaults; changeable per folder). Adding a folder or pool warns when the sample
+  rate differs from the pool or a channel is clipped (`pool.addWarnings`). The current probe must be set to unit A on the scope so the export reads `C3 in A`; the shot
+  current is the plain mean of that column. Pool files: JSON `{app: 'dpt-pool', version: 1}`.
+- **Storage** is per browser and machine: IndexedDB `scope-screenshot-analyzer` (session) and
+  `scope-dpt-pool`, localStorage `dpt-prefs`. Moving data: Export/Import session or pool.
 
-## Conventions
-- Match the existing style: 2-space indent, single quotes, small IIFE modules returning a public
-  API, short header comment per file explaining its role, comments only where non-obvious.
-- UI text is English. Every mouse interaction should have a keyboard path where sensible.
-- Calibration values carry a status (`ok` / `warn` / `manual`) shown as badges. New auto-detected
-  values should follow the same pattern so that uncertain results are visible to the user.
-- Update `README.md` (user-facing) and the docs when behaviour or structure changes.
+## Conventions and gotchas (do not change without asking)
+- **Must work from `file://`**: classic `<script>` tags only, no ES modules, no `fetch` of local files, no
+  workers from files. New files go into the script list(s) in dependency order: analyzer util → ocr →
+  calibrate → layouts → traces → series → measure → state → loaders → view → overview → ui → app; DPT util →
+  series → loaders → dpt/edges → pool → plot → ui → app; plus `tools/test.html` / `harvest.html` if tests need them.
+- No dependencies: no npm packages, no CDNs. Third-party code only vendored in `lib/` with a pinned version.
+- One global, `App` (test-only `SAMPLES`). Modules talk via `App.events` and the `App.docs` API, not via
+  another module's DOM.
+- Internal units are SI (s, V, A, Hz); format only for display (`App.util.formatSI/formatRange/formatRate`),
+  parse input with `App.util.parseSI`.
+- Docs that must survive reloads: fields in `PERSISTED` (`js/state.js`); runtime caches never. After
+  changing a doc call `App.docs.touch(doc, 'cursors'|'calib'|'detect'|'notes'|'prefs')`, never IndexedDB directly.
+- **Scope-specific code** belongs in `js/layouts/<scope>.js` (registry picks the best `match()` score).
+  Known leaks still RTB2000-specific and global: channel hue windows `App.calib.CHANNELS` (`calibrate.js`,
+  used by `traces.js` extraction and as display colours) and the persistence heat palette (`traces.js`).
+  Adding a scope with other trace colours means moving these into the layout descriptor first.
+- Auto-detected values carry a status `ok`/`warn`/`manual` shown as badges, so uncertain results stay visible.
+- Style: 2-space indent, single quotes, small IIFE modules returning their API, a header comment per file,
+  comments only where non-obvious. UI text English; every mouse action gets a keyboard path where sensible.
+- Never hand-edit `js/ocr_glyphs.js` or `js/demo_image.js` (generated, see TESTING.md).
+- Repo files use LF. Python text-mode writes on Windows produce CRLF; use the Edit tool or `newline='\n'`,
+  check with `git ls-files --eol`.
+- DPT performance (2026-10-30): one pool import = one save + one render (`pool.addBatches`); view selects
+  redraw only what depends on them; a full `renderAll` costs ~110 ms with 273 shots, so keep it off hover
+  and other frequent events. `edges.js` sorts Float64Arrays (exact results), keep it that way.
+- Known fragile spots, left as they are: `touch(null, 'prefs')` emits `doc-updated` with no doc; `#calib`
+  handlers assume an active doc; `view.js` sets `SPAD`/`HANDLE_W` as a side effect of `seriesView()`;
+  session import does not wait between files (picker allows one file).
+- Keep README.md (user-facing) and docs/ in step with behaviour and structure.
+
+## Maintenance rule
+Before finishing any task that changes architecture, commands, dependencies, file formats or instrument
+interfaces, or that uncovers a new gotcha or decision: update this file (and the imported docs) in the same
+change. Keep it under ~100 lines; put details in `docs/` and import them with `@docs/<file>.md`.
+Do not rely on auto memory, because it does not sync between the user's machines.

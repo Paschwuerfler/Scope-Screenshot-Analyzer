@@ -1,18 +1,23 @@
-// DOM panels around the canvas: thumbnail strip, cursor readout, calibration editor,
-// status bar, toasts. Rendering is plain template strings; re-render on events.
+// DOM panels around the canvas: thumbnail strip (incl. drag-to-merge), merge and export dialogs,
+// cursor readout, calibration / display editor, notes card, status bar, toasts, splitter.
+// Rendering is plain template strings; re-render on events.
 App.ui = (() => {
   const { formatSI, formatRange, formatRate, parseSI, escapeHtml: esc } = App.util;
   const $ = sel => document.querySelector(sel);
   const prefs = { showOverlay: false, bigText: false, panelW: null, panelH: null };   // panelW/H: splitter positions (px), null = CSS default
+  /** Save prefs with the session (they live in the session meta; 'prefs' only redraws readout and view). */
+  const savePrefs = () => App.docs.touch(App.docs.active() || null, 'prefs');
+  /** Focus a control of the calibration panel after it was re-rendered (keeps keyboard stepping going). */
+  const focusCalib = sel => { const el = document.querySelector(`#calib ${sel}`); if (el) el.focus(); };
 
   // ---------------------------------------------------------------- status badges
   const BADGE = { ok: ['✓', 'ok', 'Detected automatically, sources agree'], warn: ['!', 'warn', 'Uncertain — please check'], manual: ['✎', 'manual', 'Set manually'] };
   const badge = st => { const b = BADGE[st] || BADGE.warn; return `<span class="badge ${b[1]}" title="${b[2]}">${b[0]}</span>`; };
 
   function docHealth(d) {
+    if (!d.layoutId) return 'manual';
     const all = [d.status.time.tdiv, d.status.time.tCenter];
     Object.entries(d.calib.channels).forEach(([id, c]) => { if (c.on) { const s = d.status.channels[id] || {}; all.push(s.vdiv, s.zeroY); } });
-    if (!d.layoutId) return 'manual';
     if (all.includes('warn') || all.includes(undefined)) return 'warn';
     return all.includes('manual') ? 'manual' : 'ok';
   }
@@ -301,7 +306,7 @@ App.ui = (() => {
   // ---------------------------------------------------------------- one-step undo for bulk changes
   // Auto scale / Re-detect and Paste display settings replace many values at once. The button that
   // did it turns into "Undo" for UNDO_MS; undoing restores the snapshot taken just before.
-  const UNDO_MS = 10000;
+  const UNDO_MS = 10000, UNDO_TIP = `Undo is offered for ${UNDO_MS / 1000} s.`;
   let undo = null;   // { docId, btn, label, snap, timer }
   const SNAP_KEYS = ['calib', 'status', 'notes', 'raw', 'layoutId', 'layoutName', 'axisCh'];
   function snapshot(d) {
@@ -375,8 +380,7 @@ App.ui = (() => {
     if (d.kind !== 'series') d.status.channels[id] = { ...(d.status.channels[id] || {}), vdiv: 'manual' };
     App.docs.touch(d, 'calib');
     toast(`${App.calib.chLabel(d, id)} is now shown in ${cc.unit}.`);
-    const b = document.querySelector(`#calib [data-unit="${id}"]`);
-    if (b) b.focus();
+    focusCalib(`[data-unit="${id}"]`);
   }
 
   function renderCalib() {
@@ -413,7 +417,7 @@ App.ui = (() => {
         <button id="btn-pickgrid" class="small">Pick grid on image…</button>
         <label class="inline"><input type="checkbox" id="chk-persist" ${c.persistence ? 'checked' : ''}> Persistence (colour-graded) display</label>
       </details>`;
-    if (d.notes && d.notes.length) html += `<ul class="notes">${d.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>`;
+    html += notesHtml(d, 'notes');
     if (d.raw && Object.keys(d.raw).length) html += `<details class="raw"><summary>Raw OCR</summary><pre>${esc(JSON.stringify(d.raw, null, 1))}</pre></details>`;
     box.innerHTML = html;
   }
@@ -426,10 +430,11 @@ App.ui = (() => {
     return { tdiv: App.series.gridDiv((w.xb - w.xa) * s.dt), tCenter: App.calib.tAt(d.calib, (w.xa + w.xb) / 2) };
   }
   function seriesDisplayHtml(d) {
-    const c = d.calib, w = seriesWindow(d), axis = App.series.axisChannel(d);
+    const c = d.calib, s = d.series, w = seriesWindow(d), axis = App.series.axisChannel(d);
+    const span = esc(formatSI((s.n - 1) * s.dt, 's')), n = s.n.toLocaleString('en');
     const info = d.parts
-      ? `<span class="layout-name one-line" title="${esc(d.parts.map(p => p.name).join(' + '))}">Merged · ${d.parts.length} recordings · ${esc(formatSI((d.series.n - 1) * d.series.dt, 's'))}</span>`
-      : `<span class="layout-name one-line" title="CSV: ${d.series.n.toLocaleString('en')} samples, ${esc(formatSI((d.series.n - 1) * d.series.dt, 's'))} long, ${esc(formatSI(d.series.dt, 's'))} per sample">${d.series.n.toLocaleString('en')} Sa · ${esc(formatSI((d.series.n - 1) * d.series.dt, 's'))} · <span class="rate">${esc(App.series.rateText(d.series))}</span></span>`;
+      ? `<span class="layout-name one-line" title="${esc(d.parts.map(p => p.name).join(' + '))}">Merged · ${d.parts.length} recordings · ${span}</span>`
+      : `<span class="layout-name one-line" title="CSV: ${n} samples, ${span} long, ${esc(formatSI(s.dt, 's'))} per sample">${n} Sa · ${span} · <span class="rate">${esc(App.series.rateText(s))}</span></span>`;
     let html = `
       <div class="layout-row">${info}
         ${undoable(d, 'btn-redetect', 'Auto scale', 'Reset all channel scales to fit the data')}</div>
@@ -451,9 +456,10 @@ App.ui = (() => {
         ${copiedDisplay ? undoable(d, 'btn-pastedisp', 'Paste settings', `Apply the display settings copied from ${esc(copiedDisplay.from)}`) : '<button class="small" disabled title="Copy the settings of another CSV first">Paste settings</button>'}
       </div>`;
     if (d.parts) html += recordingsHtml(d);
-    if (d.notes && d.notes.length) html += `<ul class="notes series-notes">${d.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>`;
-    return html;
+    return html + notesHtml(d, 'notes series-notes');
   }
+  /** Detection / import notes of a doc (amber list under the calibration or display settings). */
+  const notesHtml = (d, cls) => (d.notes && d.notes.length ? `<ul class="${cls}">${d.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : '');
   // Merged views: the first recording is the time reference; every other one has a single time
   // offset against it (two files = one number), set by typing, Align at the cursors or Ctrl+drag.
   function recordingsHtml(d) {
@@ -480,8 +486,7 @@ App.ui = (() => {
     const p = d.parts[k];
     p.shift = (p.shift || 0) + dir * seriesWindow(d).tdiv * (big ? 1 : 0.1);
     App.docs.remerge(d, true);
-    const inp = document.querySelector(`#calib [data-shift="${k}"]`);
-    if (inp) inp.focus();
+    focusCalib(`[data-shift="${k}"]`);
   }
   /**
    * Align recording k to the reference: one cursor marks a feature of the reference, the other the
@@ -554,8 +559,7 @@ App.ui = (() => {
     App.series.setScale(d, id, App.util.step125(ch.vdiv, dir));
     d.axisCh = id;
     App.docs.touch(d, 'calib');
-    const inp = document.querySelector(`#calib [data-vdiv="${id}"]`);
-    if (inp) inp.focus();
+    focusCalib(`[data-vdiv="${id}"]`);
   }
 
   function onCalibChange(e) {
@@ -600,7 +604,7 @@ App.ui = (() => {
   // ---------------------------------------------------------------- status bar
   function renderStatus(h) {
     const d = App.docs.active();
-    $('#status-doc').textContent = !d ? '' : d.parts ? `${d.name} — ${d.parts.length} recordings merged` : d.kind === 'series' ? `${d.name} — ${d.width.toLocaleString('en')} samples @ ${formatSI(1 / d.series.dt, 'Sa/s')}` : `${d.name} — ${d.width}×${d.height}`;
+    $('#status-doc').textContent = !d ? '' : d.parts ? `${d.name} — ${d.parts.length} recordings merged` : d.kind === 'series' ? `${d.name} — ${d.width.toLocaleString('en')} samples @ ${App.series.rateText(d.series)}` : `${d.name} — ${d.width}×${d.height}`;
     if (!d || !h) { $('#status-hover').innerHTML = ''; return; }
     const t = App.calib.tAt(d.calib, h.ix);
     let s = `<span>t = ${formatSI(t, 's')}</span>`;
@@ -665,7 +669,6 @@ App.ui = (() => {
     renderStrip(); renderReadout(); renderCalib(); renderNotes(); renderStatus(null);
     syncToggles(); applyPanelSize();
     App.view.render();
-    if (!d) return;
   }
 
   // ---------------------------------------------------------------- splitter (stage | panel)
@@ -688,10 +691,10 @@ App.ui = (() => {
       } else prefs.panelW = Math.round(App.util.clamp(main.right - e.clientX, 260, main.width * 0.6));
       applyPanelSize();
     });
-    const end = () => { if (!active) return; active = false; sp.classList.remove('active'); App.docs.touch(App.docs.active() || null, 'prefs'); };
+    const end = () => { if (!active) return; active = false; sp.classList.remove('active'); savePrefs(); };
     sp.addEventListener('pointerup', end);
     sp.addEventListener('pointercancel', end);
-    sp.addEventListener('dblclick', () => { prefs.panelW = prefs.panelH = null; applyPanelSize(); App.docs.touch(App.docs.active() || null, 'prefs'); });
+    sp.addEventListener('dblclick', () => { prefs.panelW = prefs.panelH = null; applyPanelSize(); savePrefs(); });
   }
 
   function syncToggles() {
@@ -699,7 +702,7 @@ App.ui = (() => {
     $('#tgl-bigtext').classList.toggle('on', !!prefs.bigText);
   }
 
-  function togglePref(k) { prefs[k] = !prefs[k]; syncToggles(); App.view.render(); App.docs.touch(App.docs.active() || null, 'prefs'); }
+  function togglePref(k) { prefs[k] = !prefs[k]; syncToggles(); App.view.render(); savePrefs(); }
 
   function init() {
     $('#strip-list').addEventListener('click', e => {
@@ -751,17 +754,18 @@ App.ui = (() => {
       if (id === 'btn-redetect') {
         const series = d.kind === 'series';
         withUndo(d, id, series ? 'Auto scale' : 'Re-detect', () => App.docs.touch(d, 'detect'));
-        toast(series ? 'Scales reset to fit the data. Undo is offered for 10 s.' : 'Detection re-run. Undo is offered for 10 s.');
+        toast(`${series ? 'Scales reset to fit the data.' : 'Detection re-run.'} ${UNDO_TIP}`);
       }
       if (id === 'btn-undo') doUndo();
       if (id.startsWith('btn-align-')) {
+        const k = +id.slice('btn-align-'.length);
         let swapped = false;
-        withUndo(d, id, 'Align', () => { swapped = alignAtCursors(d, +id.slice(10)); });
-        toast(`Aligned: ${shortName(d.parts[+id.slice(10)].name)} at cursor ${swapped ? 1 : 2} moved onto the reference at cursor ${swapped ? 2 : 1}. Undo is offered for 10 s.`);
+        withUndo(d, id, 'Align', () => { swapped = alignAtCursors(d, k); });
+        toast(`Aligned: ${shortName(d.parts[k].name)} at cursor ${swapped ? 1 : 2} moved onto the reference at cursor ${swapped ? 2 : 1}. ${UNDO_TIP}`);
       }
       if (id === 'btn-copydisp') copyDisplay(d);
       if (id === 'btn-pastedisp' && copiedDisplay) pasteDisplay(d);
-      if (e.target.id === 'btn-pickgrid') { App.view.setMode({ type: 'pick-grid' }); toast('Drag a rectangle over the graticule (outer grid border).'); }
+      if (id === 'btn-pickgrid') { App.view.setMode({ type: 'pick-grid' }); toast('Drag a rectangle over the graticule (outer grid border).'); }
       const ax = e.target.closest('[data-axis]');
       if (ax) { d.axisCh = ax.dataset.axis; App.docs.touch(d, 'calib'); }
       const un = e.target.closest('[data-unit]');

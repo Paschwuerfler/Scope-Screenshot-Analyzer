@@ -161,5 +161,5 @@ App.loaders = (() => {
     window.opener.postMessage({ type: 'scope-ready' }, '*');
   }
 
-  return { init, initHandoff, openHandoff, pick, loadFiles, loadDemo, readEntry, filesFromDataTransfer };
+  return { init, initHandoff, pick, loadFiles, loadDemo, readEntry, filesFromDataTransfer };
 })();

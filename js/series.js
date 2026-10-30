@@ -83,17 +83,19 @@ App.series = (() => {
     // numbers
     const N0 = lines.length - first;
     const t = new Float64Array(N0), vals = Array.from({ length: nCh }, () => new Float32Array(N0));
+    const quoted = text.includes('"'), scale = hdr.map(h => h.scale);
     let n = 0;
     for (let i = first; i < lines.length; i++) {
       let ln = lines[i];
       if (!ln) continue;
       if (decComma) ln = ln.replace(/,/g, '.');
+      if (quoted) ln = ln.replace(/"/g, '');
       const f = ln.split(delim);
       if (f.length < nCh + 1) continue;
-      const tv = parseFloat(f[0].replace(/"/g, ''));
+      const tv = parseFloat(f[0]);
       if (!isFinite(tv)) continue;
-      t[n] = tv * hdr[0].scale;
-      for (let c = 0; c < nCh; c++) vals[c][n] = parseFloat(f[c + 1].replace(/"/g, '')) * hdr[c + 1].scale;
+      t[n] = tv * scale[0];
+      for (let c = 0; c < nCh; c++) vals[c][n] = parseFloat(f[c + 1]) * scale[c + 1];
       n++;
     }
     if (n < 2) throw new Error('fewer than 2 samples');
@@ -288,7 +290,7 @@ App.series = (() => {
     for (const m of [1, 2, 5, 10]) { const dd = Math.abs(Math.log(m * e / target)); if (dd < bd) { bd = dd; best = m * e; } }
     return best;
   }
-  const rateText = s => `${App.util.formatSI(1 / s.dt, 'Sa/s')}`;
+  const rateText = s => App.util.formatSI(1 / s.dt, 'Sa/s');
 
   /** Fractional index into col.v for virtual sample index x (differs only in merged views). */
   const colIndex = (s, col, x) => (col.dt ? (s.t0 + x * s.dt - col.t0) / col.dt : x);
@@ -400,7 +402,6 @@ App.series = (() => {
     for (let k = 1; k < 10; k++) { const x = Math.round(W * k / 10) + 0.5; ctx.moveTo(x, 0); ctx.lineTo(x, H); }
     for (let k = 1; k < 8; k++) { const y = Math.round(H * k / 8) + 0.5; ctx.moveTo(0, y); ctx.lineTo(W, y); }
     ctx.stroke();
-    ctx.lineWidth = 1;
     for (const col of s.cols) {
       if (!c.channels[col.id].on) continue;
       ctx.strokeStyle = App.calib.channelById(col.id).color;
