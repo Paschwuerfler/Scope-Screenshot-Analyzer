@@ -188,7 +188,9 @@ click to pin it, <kbd>Esc</kbd> to unpin):
   and identical folder parameters, e.g. one setup measured three times into three folders, are
   drawn as one point at the mean with error bars (± σ or min–max, in Y and in the measured
   current) and the single values as small dots; *each shot* turns this off. Clicking such a point
-  pins all its shots; hovering shows the single values. **Double-click** a point to scroll the
+  pins all its shots; hovering shows the single values. A clicked point keeps its tooltip open with
+  **Hide these N shots** (hides every shot of that point for now), **Open in scope view** and
+  **Show in list**; click elsewhere, click the point again or press <kbd>Esc</kbd> to close it. **Double-click** a point to scroll the
   folder list on the left to that shot (its folder opens and the shot flashes), so you can read the
   folder's parameters; the right-click menu has the same as **Show in folder list** for any view.
 - **Table**: every shot with its parameters and metrics; click a header to sort. **Copy** gives
@@ -214,7 +216,15 @@ shot current), e.g. `S20 · 10 · 24 V · 32.4 A (NOR45A24_Rg10_24V)`, and its *
 the same values with their keys (`Rg = 10`, `Vdc = 24 V`, `I = 32.4 A`). Opening the same shot
 again reuses it and keeps your notes. If nothing happens, allow pop-ups for the page.
 
-Checkboxes in the pool show / hide single shots or whole folders. **Export pool** saves raw data
+**Showing and hiding shots**: the checkboxes in the pool show / hide single shots or whole folders;
+this choice is saved with the pool. **Hide** on a folder (or on a clicked trend point, in the
+right-click menu, or <kbd>H</kbd> for the pinned shots, else the hovered one) hides shots only for now:
+they leave the plots and the table, get a *hidden* tag in the pool list (click it to show that shot
+again), and come back with **Unhide** on the folder, **Unhide all** above the pool list
+(<kbd>Shift</kbd>+<kbd>H</kbd>) or a reload. **Collapse repeats** above the pool list merges folders
+with identical parameters into one entry (*2 runs*, the folder names under it) with the shots merged
+by name (*S05 ×2*, mean current); its checkbox and Hide act on all of them, Edit and × need the
+single folders (untick it). **Export pool** saves raw data
 and parameters to a `.json` file (drop it onto the page or use **Import pool** on another computer).
 
 **Metrics** (per edge; levels are measured per edge, because the off-state level moves with

@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DPT Sweep</title>
 <!-- ?v=N: same cache-busting number as index.html, bump both on every publish -->
-<link rel="stylesheet" href="css/app.css?v=12">
-<link rel="stylesheet" href="css/dpt.css?v=12">
+<link rel="stylesheet" href="css/app.css?v=13">
+<link rel="stylesheet" href="css/dpt.css?v=13">
 </head>
 <body class="empty">
 
@@ -30,6 +30,11 @@
 <main class="dpt">
   <aside class="pool">
     <div class="strip-head"><span>Pool</span><span id="pool-count" class="muted"></span></div>
+    <div class="pool-tools">
+      <label title="One entry per set of repeats: folders with identical parameters, their shots merged by name (×runs, mean current)"><input type="checkbox" id="tgl-pool-collapse"> Collapse repeats</label>
+      <span class="spacer"></span>
+      <button id="unhide-all" class="small" title="Show all shots hidden for now again (Shift+H)" hidden>Unhide all</button>
+    </div>
     <div id="pool-list"></div>
     <section class="card settings">
       <div class="card-head"><h3>Analysis</h3></div>
@@ -133,10 +138,12 @@
     <tr><td><kbd>C</kbd></td><td>Copy table (tab-separated)</td></tr>
     <tr><td><kbd>/</kbd></td><td>Filter shots (table and both plots), e.g. <code>I~10A</code> (around 10 A, ±10 %), <code>I~10A±2A</code>, <code>I=8..12A</code>, <code>I&gt;5A</code>, <code>RHR=330</code>, <code>33045</code> (folder / shot name); <kbd>Esc</kbd> clears</td></tr>
     <tr><td><kbd>O</kbd></td><td>Open the hovered shot (else the pinned shots) in the scope view</td></tr>
+    <tr><td><kbd>H</kbd> / <kbd>Shift</kbd>+<kbd>H</kbd></td><td>Hide the pinned shots (else the hovered one) for now / unhide all. Hidden for now = left out of plots and table until Unhide or a reload; the checkboxes are the saved choice</td></tr>
     <tr><td><kbd>Esc</kbd></td><td>Unpin all shots</td></tr>
-    <tr><td>Hover / click</td><td>Hover a curve, point or row to highlight that shot everywhere; click to pin it</td></tr>
+    <tr><td>Hover / click</td><td>Hover a curve, point or row to highlight that shot everywhere; click to pin it. Clicking a trend point also keeps its tooltip open with Hide (all shots of that point), Open and Show in list</td></tr>
     <tr><td>Double-click</td><td>On a trend point: scroll the folder list to that shot, so its folder parameters are in view</td></tr>
-    <tr><td>Right-click</td><td>On a shot (list, plot, table row): open it in the scope view, zoomed to the selected edge with cursors at 10 / 90 %, or show it in the folder list</td></tr>
+    <tr><td>Right-click</td><td>On a shot (list, plot, table row): open it in the scope view, zoomed to the selected edge with cursors at 10 / 90 %, hide it for now, or show it in the folder list</td></tr>
+    <tr><td>Folder list</td><td><b>Hide</b> / <b>Unhide</b> per folder, <b>Unhide all</b> at the top; <b>Collapse repeats</b> merges folders with identical parameters into one entry</td></tr>
   </table>
   <h4>Metrics (per edge, between the levels before and after it)</h4>
   <table>
@@ -151,13 +158,13 @@
   <div class="dialog-actions"><button data-act="close">Close</button></div>
 </dialog>
 
-<script src="js/util.js?v=12"></script>
-<script src="js/series.js?v=12"></script>
-<script src="js/loaders.js?v=12"></script>
-<script src="js/dpt/edges.js?v=12"></script>
-<script src="js/dpt/pool.js?v=12"></script>
-<script src="js/dpt/plot.js?v=12"></script>
-<script src="js/dpt/ui.js?v=12"></script>
-<script src="js/dpt/app.js?v=12"></script>
+<script src="js/util.js?v=13"></script>
+<script src="js/series.js?v=13"></script>
+<script src="js/loaders.js?v=13"></script>
+<script src="js/dpt/edges.js?v=13"></script>
+<script src="js/dpt/pool.js?v=13"></script>
+<script src="js/dpt/plot.js?v=13"></script>
+<script src="js/dpt/ui.js?v=13"></script>
+<script src="js/dpt/app.js?v=13"></script>
 </body>
 </html>

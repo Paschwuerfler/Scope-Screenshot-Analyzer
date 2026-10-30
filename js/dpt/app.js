@@ -157,6 +157,8 @@ App.dpt.app = (() => {
     c: copyTable,
     '/': () => ui.focusFilter(),
     o: () => openInScope(ui.keyShots()),
+    h: () => ui.hideKeyShots(),
+    H: () => ui.unhideAll(),
     '+': () => ui.zoomOverlay(0.8), '=': () => ui.zoomOverlay(0.8), '-': () => ui.zoomOverlay(1.25),
     ArrowLeft: () => ui.panOverlay(-0.1), ArrowRight: () => ui.panOverlay(0.1),
     Escape: () => ui.unpinAll(),

@@ -66,6 +66,11 @@ modules under `App.dpt`:
   its own levels (see README "DPT sweep").
 - View settings live in `localStorage` (`dpt-prefs`), the pool in its own IndexedDB, separate from
   the analyzer session.
+- Two kinds of hidden: `shot.hidden` (pool checkboxes, saved) and `tmpHidden` in `ui.js` (Hide on a
+  folder / trend point / menu, `H`; a Set of shot ids, never saved). Views use `isOff(shot)` = either.
+  Hiding also unpins (a pinned but undrawn shot would dim all others). Repeats are grouped the same way
+  in trend (`trendPoints`), table (`tableEntries`) and pool list (`poolEntries`): shot name + all
+  non-built-in parameter values; merged list items / rows carry `data-ids`, read with `rowIds()`.
 - **Open in scope view** (context menu in `ui.js`, `openInScope` in `app.js`): the DPT page opens
   `index.html` as the named tab `scope-analyzer` and sends
   `{ type: 'scope-open', id, docs: [{ name, notes, csv, names, edge: {t1, t2, a, b} }] }` by `postMessage`
@@ -223,4 +228,4 @@ changes add defaults when restoring in `App.docs.restore`.
 | `build_demo.ps1` | regenerate `js/demo_image.js` (embedded screenshot behind "Load demo" / `?demo`) |
 | `headless.ps1` | find browser, dump an element of a headless-rendered page |
 | `dpt_test.html` + `dpt_test.ps1` | DPT edge metrics on synthetic double pulses, parameter parsing, `samples/NOR45A24` |
-| `dpt_ui_test.ps1` | DPT page over CDP: two folders through the dialog, hover / pin, edges, sort, right-click → open in the analyzer tab (`Connect-CdpTarget`), reload |
+| `dpt_ui_test.ps1` | DPT page over CDP: two folders through the dialog, hover / pin, edges, sort, hide / unhide, pool Collapse repeats, right-click → open in the analyzer tab (`Connect-CdpTarget`), reload |

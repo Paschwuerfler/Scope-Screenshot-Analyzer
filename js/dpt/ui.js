@@ -6,11 +6,15 @@ App.dpt.ui = (() => {
   const P = App.dpt.plot, U = App.util, pool = App.dpt.pool;
   const esc = U.escapeHtml;
   const PREFS_KEY = 'dpt-prefs';
-  const prefs = Object.assign({ edge: null, color: 'I', metric: 'slew1090', x: 'I', groups: ['Folder'], repeats: 'sd', logX: false, filter: '', sort: null, view: null, collapse: false }, loadPrefs());
+  const prefs = Object.assign({ edge: null, color: 'I', metric: 'slew1090', x: 'I', groups: ['Folder'], repeats: 'sd', logX: false, filter: '', sort: null, view: null, collapse: false, poolCollapse: false }, loadPrefs());
   if (typeof prefs.group === 'string') { prefs.groups = prefs.group ? [prefs.group] : []; delete prefs.group; }   // prefs before multi-key grouping
   let hover = null;              // shot id under the mouse (any view)
   const pinned = new Set();      // shot ids pinned by click
   const collapsed = new Set();   // batch ids collapsed in the pool list
+  // Shot ids hidden for now (trend point, folder Hide button, H). Not saved: a reload shows them again.
+  // shot.hidden (the checkboxes) is the saved choice; a shot is off when either applies.
+  const tmpHidden = new Set();
+  const isOff = s => s.hidden || tmpHidden.has(s.id);
 
   /** Metrics on the trend Y axis / table. rate: V/s shown as V/ns etc.; zero: axis starts at 0. */
   const METRICS = [
@@ -35,7 +39,7 @@ App.dpt.ui = (() => {
   // ---------------------------------------------------------------- data helpers
   const allRows = () => pool.rows(prefs.edge).filter(r => r.edge);
   const shownRows = () => { const f = compileFilter(prefs.filter); return allRows().filter(f.test); };
-  const visRows = () => shownRows().filter(r => !r.shot.hidden);
+  const visRows = () => shownRows().filter(r => !isOff(r.shot));
   const swCol = r => r.shot.cols[r.batch.roles.sw];
   const keyInfo = k => pool.paramKeys().find(x => x.key === k);
   function fmtParam(k, v) {
@@ -188,26 +192,57 @@ App.dpt.ui = (() => {
   }
 
   // ---------------------------------------------------------------- pool list
+  /**
+   * Pool list entries: one list of batches per entry. With prefs.poolCollapse, folders with identical
+   * parameters (repeats, as in the trend plot and table) share one entry, their shots merged by shot name.
+   */
+  function poolEntries() {
+    if (!prefs.poolCollapse) return pool.batches.map(b => [b]);
+    const keys = pool.paramKeys().filter(k => !k.builtin).map(k => k.key), sets = new Map();
+    for (const b of pool.batches) {
+      const p = {};
+      for (const q of b.params) if (q.key) p[q.key] = q.value !== null ? q.value : q.text;
+      const id = JSON.stringify(keys.map(k => p[k]));
+      if (!sets.has(id)) sets.set(id, []);
+      sets.get(id).push(b);
+    }
+    return [...sets.values()];
+  }
+  /** Checkbox state attributes for a set of shots: checked when all are shown, indeterminate when some are. */
+  const checkAttrs = sh => { const on = sh.filter(s => !s.hidden).length; return `${on === sh.length ? ' checked' : ''}${on && on < sh.length ? ' data-mixed="1"' : ''}`; };
   function renderPool() {
     const col = colorizer(), byShot = new Map(allRows().map(r => [r.shot.id, r])), flt = compileFilter(prefs.filter);
     const n = pool.shots.length;
     $('#pool-count').textContent = n ? `${pool.batches.length} folder${pool.batches.length > 1 ? 's' : ''} · ${n} shots` : '';
-    $('#pool-list').innerHTML = pool.batches.map(b => {
-      const sh = pool.shots.filter(s => s.batchId === b.id), on = sh.filter(s => !s.hidden).length;
+    $('#tgl-pool-collapse').checked = prefs.poolCollapse;
+    $('#unhide-all').hidden = !tmpHidden.size;
+    $('#unhide-all').textContent = `Unhide all (${tmpHidden.size})`;
+    $('#pool-list').innerHTML = poolEntries().map(bs => {
+      const b = bs[0], ids = new Set(bs.map(x => x.id)), many = bs.length > 1;
+      const sh = pool.shots.filter(s => ids.has(s.batchId)), anyTmp = sh.some(s => tmpHidden.has(s.id));
       const params = b.params.filter(p => p.key).map(p => `${esc(p.key)} = ${esc(p.value !== null ? U.formatSI(p.value, p.unit, 4) : p.text)}`).join(' · ');
-      return `<details class="batch" data-batch="${b.id}"${collapsed.has(b.id) ? '' : ' open'}>
-        <summary><input type="checkbox" data-bact="toggle" title="Show / hide all shots of this folder"${on === sh.length ? ' checked' : ''}${on && on < sh.length ? ' data-mixed="1"' : ''}>
-          <span class="batch-name" title="${esc(b.name)}">${esc(b.name)}</span><span class="muted">${sh.length}</span>
-          <span class="batch-btns"><button data-bact="edit" title="Edit name, parameters, channels and shot currents">Edit</button><button data-bact="remove" class="danger" title="Remove this folder from the pool">×</button></span></summary>
-        <div class="batch-params">${params || '<i>no parameters</i>'} · ${esc(b.roles.sw)} switch node, ${esc(b.roles.cur || 'no')} current</div>
-        <ul class="shot-list">${sh.map(s => {
-          const r = byShot.get(s.id), warn = shotWarnings(s, r && r.edge);
-          const out = r && flt.n && !flt.test(r);
-          return `<li class="shot${s.hidden ? ' off' : ''}${out ? ' filtered' : ''}" data-shot="${s.id}"${out ? ' title="Hidden by the filter"' : ''}>
-            <input type="checkbox" data-sact="toggle"${s.hidden ? '' : ' checked'} title="Show in plots and table">
+      const names = bs.map(x => x.name).join(', ');
+      // shots by name: one item per shot, or per set of repeats when the entry holds several folders
+      const items = new Map();
+      for (const s of sh) { const k = many ? s.label : s.id; if (!items.has(k)) items.set(k, []); items.get(k).push(s); }
+      return `<details class="batch${many ? ' repeats' : ''}" data-batch="${b.id}" data-batches="${[...ids].join(' ')}"${collapsed.has(b.id) ? '' : ' open'}>
+        <summary><input type="checkbox" data-bact="toggle" title="Show / hide all shots of ${many ? 'these folders' : 'this folder'} (saved)"${checkAttrs(sh)}>
+          <span class="batch-name" title="${esc(names)}">${esc(b.name)}${many ? ` <span class="muted">+${bs.length - 1}</span>` : ''}</span><span class="muted">${many ? `${bs.length} runs · ` : ''}${sh.length}</span>
+          <span class="batch-btns"><button data-bact="hide" title="${anyTmp ? 'Show the hidden shots again' : 'Hide all shots for now (until Unhide or reload)'}">${anyTmp ? 'Unhide' : 'Hide'}</button>${many ? '' :
+          `<button data-bact="edit" title="Edit name, parameters, channels and shot currents">Edit</button><button data-bact="remove" class="danger" title="Remove this folder from the pool">×</button>`}</span></summary>
+        <div class="batch-params">${many ? `<div title="Untick Collapse repeats to edit a single folder">${esc(names)}</div>` : ''}${params || '<i>no parameters</i>'} · ${esc(b.roles.sw)} switch node, ${esc(b.roles.cur || 'no')} current</div>
+        <ul class="shot-list">${[...items.values()].map(list => {
+          const s = list[0], rs = list.map(x => byShot.get(x.id)).filter(Boolean), r = rs[0];
+          const warn = [...new Set(list.flatMap(x => shotWarnings(x, (byShot.get(x.id) || {}).edge)))];
+          const out = rs.length && flt.n && rs.every(x => !flt.test(x)), tmp = list.some(x => tmpHidden.has(x.id));
+          const I = list.map(pool.shotCurrent).filter(v => typeof v === 'number' && isFinite(v));
+          const Imean = I.length ? I.reduce((a, v) => a + v, 0) / I.length : null, over = list.some(x => x.current !== null && x.current !== undefined);
+          return `<li class="shot${list.every(isOff) ? ' off' : ''}${out ? ' filtered' : ''}" data-shot="${s.id}"${list.length > 1 ? ` data-ids="${list.map(x => x.id).join(' ')}"` : ''}${out ? ' title="Hidden by the filter"' : ''}>
+            <input type="checkbox" data-sact="toggle"${checkAttrs(list)} title="Show in plots and table (saved)">
             <span class="swatch" style="background:${r ? col.of(r) : 'transparent'}"></span>
-            <span class="shot-label">${esc(s.label)}</span>
-            <span class="shot-i">${U.formatSI(pool.shotCurrent(s), 'A', 3)}${s.current !== null && s.current !== undefined ? '*' : ''}</span>
+            <span class="shot-label">${esc(s.label)}${list.length > 1 ? ` <span class="muted">×${list.length}</span>` : ''}</span>
+            ${tmp ? '<button class="tag" data-sact="unhide" title="Hidden for now: click to show again">hidden</button>' : ''}
+            <span class="shot-i"${list.length > 1 ? ' title="Mean of the runs"' : ''}>${U.formatSI(Imean, 'A', 3)}${over ? '*' : ''}</span>
             ${warn.length ? `<span class="badge warn" title="${esc(warn.join('\n'))}">!</span>` : ''}</li>`;
         }).join('')}</ul></details>`;
     }).join('');
@@ -226,17 +261,23 @@ App.dpt.ui = (() => {
     list.addEventListener('click', e => {
       const bEl = e.target.closest('[data-batch]'), sEl = e.target.closest('[data-shot]');
       const bact = e.target.dataset.bact, sact = e.target.dataset.sact;
-      if (bact === 'toggle' && bEl) {
-        const ids = pool.shots.filter(s => s.batchId === bEl.dataset.batch).map(s => s.id);
-        pool.updateShots(ids, { hidden: !e.target.checked });
+      const batchShots = () => { const set = new Set(bEl.dataset.batches.split(' ')); return pool.shots.filter(s => set.has(s.batchId)).map(s => s.id); };
+      if (bact === 'toggle' && bEl) pool.updateShots(batchShots(), { hidden: !e.target.checked });
+      else if (bact === 'hide') {
+        e.preventDefault();   // inside <summary>: do not fold the folder
+        const ids = batchShots();
+        if (ids.some(id => tmpHidden.has(id))) unhideShots(ids); else hideShots(ids);
       } else if (bact === 'edit') { e.preventDefault(); openBatchDialog({ batchId: bEl.dataset.batch }); }
       else if (bact === 'remove') {
         e.preventDefault();
         const b = pool.batches.find(x => x.id === bEl.dataset.batch);
         if (confirm(`Remove folder "${b.name}" and its shots from the pool?`)) pool.removeBatch(b.id);
-      } else if (sact === 'toggle' && sEl) pool.updateShots(sEl.dataset.shot, { hidden: !e.target.checked });
-      else if (sEl) togglePin(sEl.dataset.shot);
+      } else if (sact === 'toggle' && sEl) pool.updateShots(rowIds(sEl), { hidden: !e.target.checked });
+      else if (sact === 'unhide' && sEl) unhideShots(rowIds(sEl));
+      else if (sEl) togglePins(rowIds(sEl));
     });
+    $('#tgl-pool-collapse').addEventListener('change', e => { prefs.poolCollapse = e.target.checked; savePrefs(); renderPool(); });
+    $('#unhide-all').addEventListener('click', unhideAll);
     list.addEventListener('toggle', e => {
       const id = e.target.dataset && e.target.dataset.batch;
       if (id) { if (e.target.open) collapsed.delete(id); else collapsed.add(id); }
@@ -246,7 +287,7 @@ App.dpt.ui = (() => {
   }
   /** Scroll the pool list to a shot (opening its folder) so the folder parameters are in view, and flash it. */
   function revealShot(id) {
-    const li = $('#pool-list').querySelector(`[data-shot="${id}"]`);
+    const li = $('#pool-list').querySelector(`[data-shot="${id}"], [data-ids~="${id}"]`);
     if (!li) return;
     const det = li.closest('details');
     det.open = true;
@@ -267,13 +308,27 @@ App.dpt.ui = (() => {
     for (const id of ids) if (on) pinned.add(id); else pinned.delete(id);
     syncHighlight();
   }
-  function unpinAll() { pinned.clear(); syncHighlight(); }
+  function unpinAll() { closeTip(); pinned.clear(); syncHighlight(); }
+
+  // ---------------------------------------------------------------- hide for now (tmpHidden)
+  /** Hidden shots are unpinned too: a pinned shot that is not drawn would still dim all the others. */
+  function hideShots(ids) {
+    closeTip();
+    for (const id of ids) { tmpHidden.add(id); pinned.delete(id); }
+    if (ids.includes(hover)) hover = null;
+    renderHidden();
+    toast(`${ids.length === 1 ? '1 shot' : ids.length + ' shots'} hidden · Unhide all (Shift+H) shows them again`);
+  }
+  function unhideShots(ids) { for (const id of ids) tmpHidden.delete(id); renderHidden(); }
+  function unhideAll() { if (!tmpHidden.size) return; tmpHidden.clear(); renderHidden(); }
+  function renderHidden() { renderPool(); renderTable(); drawOverlay(); drawTrend(); }
+  /** H: the pinned shots (a clicked trend point pins all its repeats), else the hovered one. */
+  function hideKeyShots() {
+    const ids = pinned.size ? [...pinned] : hover ? [hover] : [];
+    if (ids.length) hideShots(ids); else toast('Hover or pin a shot first.');
+  }
   function syncHighlight(redraw = true) {
-    for (const el of document.querySelectorAll('[data-shot]')) {
-      el.classList.toggle('hl', el.dataset.shot === hover);
-      el.classList.toggle('pinned', pinned.has(el.dataset.shot));
-    }
-    for (const el of document.querySelectorAll('#tbl tr[data-row]')) {
+    for (const el of document.querySelectorAll('#pool-list [data-shot], #tbl tr[data-row]')) {
       const ids = rowIds(el);
       el.classList.toggle('hl', ids.includes(hover));
       el.classList.toggle('pinned', ids.some(id => pinned.has(id)));
@@ -444,7 +499,7 @@ App.dpt.ui = (() => {
   function showTip(tip, mx, my, cv, html) {
     tip.innerHTML = html; tip.style.display = 'block';
     const W = cv.clientWidth, tw = tip.offsetWidth;
-    tip.style.left = (mx + 14 + tw > W ? mx - 14 - tw : mx + 14) + 'px';
+    tip.style.left = Math.max(4, mx + 14 + tw > W ? mx - 14 - tw : mx + 14) + 'px';
     tip.style.top = Math.max(4, my - 10 - tip.offsetHeight) + 'px';
   }
 
@@ -560,32 +615,65 @@ App.dpt.ui = (() => {
     for (const p of tr.pts) { const d = Math.hypot(p.X - mx, p.Y - my); if (d < bd) { bd = d; best = p; } }
     return best;
   }
+  function trendTipHtml(hit) {
+    const m = metric(prefs.metric), warn = hit.rows.flatMap(r => [...r.shot.res.warn, ...r.edge.warn]);
+    const warnHtml = warn.length ? `<br><span style="color:var(--warn)">! ${esc(warn.join('; '))}</span>` : '';
+    if (hit.rows.length > 1) {
+      // p.y / ys / ye are in plot units (rate metrics scaled by tr.mult); fmtMetric wants SI
+      const p = hit.pt, fy = v => esc(fmtMetric(m, v / tr.mult)), spread = prefs.repeats === 'range' ? 'min–max' : '± σ';
+      return `<b>${hit.rows.length} repeats of ${esc(hit.r.shot.label)}</b> (${hit.rows.map(r => esc(r.batch.name)).join(', ')})<br>` +
+        `${esc(keyInfo(prefs.x).label)} = ${esc(fmtParam(prefs.x, p.x))} (${p.xs.map(v => esc(fmtParam(prefs.x, v))).join(', ')})<br>` +
+        `${esc(m.label)} = ${fy(p.y)}, ${spread}: ${fy(p.ye[0])} … ${fy(p.ye[1])}<br>` +
+        `<span class="muted">single: ${p.ys.map(fy).join(', ')}</span>` + warnHtml;
+    }
+    return `<b>${esc(hit.r.batch.name)} / ${esc(hit.r.shot.label)}</b><br>` +
+      `${esc(keyInfo(prefs.x).label)} = ${esc(fmtParam(prefs.x, hit.r.p[prefs.x]))}<br>${esc(m.label)} = ${esc(fmtMetric(m, hit.r.edge[m.key]))}` +
+      (prefs.groups.length ? `<br>${esc(groupLabel(hit.r))}` : '') + warnHtml;
+  }
+  /**
+   * Clicking a trend point keeps its tooltip open with actions (tipLock = { ids }) until a click
+   * elsewhere, Esc, a second click on the point or a pool change. Hover tooltips pause meanwhile.
+   */
+  let tipLock = null;
+  function closeTip() {
+    if (!tipLock) return;
+    tipLock = null;
+    const tip = $('#tip-trend'); tip.classList.remove('locked'); tip.style.display = 'none';
+  }
+  function lockTip(hit, mx, my) {
+    const ids = hit.rows.map(r => r.shot.id), n = ids.length;
+    tipLock = { ids };
+    const tip = $('#tip-trend');
+    tip.classList.add('locked');
+    showTip(tip, mx, my, $('#cv-trend'), trendTipHtml(hit) + `<div class="tip-acts">
+      <button data-tip="hide" title="Hide ${n > 1 ? 'all shots of this point' : 'this shot'} from plots and table for now (H)">Hide ${n > 1 ? `these ${n} shots` : 'this shot'}</button>
+      <button data-tip="open" title="Open in the analyzer (O)">Open in scope view</button>
+      <button data-tip="reveal" title="Scroll the folder list to this shot">Show in list</button></div>`);
+  }
   function initTrendEvents() {
     const cv = $('#cv-trend'), tip = $('#tip-trend');
     cv.addEventListener('pointermove', e => {
       const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, hit = trendHit(mx, my);
       setHover(hit ? hit.r.shot.id : null);
+      if (tipLock) return;
       if (!hit) { tip.style.display = 'none'; return; }
-      const m = metric(prefs.metric), warn = hit.rows.flatMap(r => [...r.shot.res.warn, ...r.edge.warn]);
-      if (hit.rows.length > 1) {
-        // p.y / ys / ye are in plot units (rate metrics scaled by tr.mult); fmtMetric wants SI
-        const p = hit.pt, fy = v => esc(fmtMetric(m, v / tr.mult)), spread = prefs.repeats === 'range' ? 'min–max' : '± σ';
-        showTip(tip, mx, my, cv, `<b>${hit.rows.length} repeats of ${esc(hit.r.shot.label)}</b> (${hit.rows.map(r => esc(r.batch.name)).join(', ')})<br>` +
-          `${esc(keyInfo(prefs.x).label)} = ${esc(fmtParam(prefs.x, p.x))} (${p.xs.map(v => esc(fmtParam(prefs.x, v))).join(', ')})<br>` +
-          `${esc(m.label)} = ${fy(p.y)}, ${spread}: ${fy(p.ye[0])} … ${fy(p.ye[1])}<br>` +
-          `<span class="muted">single: ${p.ys.map(fy).join(', ')}</span>` +
-          (warn.length ? `<br><span style="color:var(--warn)">! ${esc(warn.join('; '))}</span>` : ''));
-        return;
-      }
-      showTip(tip, mx, my, cv, `<b>${esc(hit.r.batch.name)} / ${esc(hit.r.shot.label)}</b><br>` +
-        `${esc(keyInfo(prefs.x).label)} = ${esc(fmtParam(prefs.x, hit.r.p[prefs.x]))}<br>${esc(m.label)} = ${esc(fmtMetric(m, hit.r.edge[m.key]))}` +
-        (prefs.groups.length ? `<br>${esc(groupLabel(hit.r))}` : '') +
-        (warn.length ? `<br><span style="color:var(--warn)">! ${esc(warn.join('; '))}</span>` : ''));
+      showTip(tip, mx, my, cv, trendTipHtml(hit));
     });
-    cv.addEventListener('pointerleave', () => { tip.style.display = 'none'; setHover(null); });
-    cv.addEventListener('click', e => { const b = cv.getBoundingClientRect(), hit = trendHit(e.clientX - b.left, e.clientY - b.top); if (!hit) return;
-      togglePins(hit.rows.map(r => r.shot.id));   // a repeat point pins / unpins all its shots together
+    cv.addEventListener('pointerleave', () => { if (!tipLock) tip.style.display = 'none'; setHover(null); });
+    cv.addEventListener('click', e => {
+      const b = cv.getBoundingClientRect(), mx = e.clientX - b.left, my = e.clientY - b.top, hit = trendHit(mx, my);
+      if (!hit) { closeTip(); return; }
+      const ids = hit.rows.map(r => r.shot.id), same = tipLock && tipLock.ids.join() === ids.join();
+      togglePins(ids);   // a repeat point pins / unpins all its shots together
+      if (same) closeTip(); else lockTip(hit, mx, my);
     });
+    tip.addEventListener('click', e => {
+      const a = e.target.dataset.tip, ids = tipLock && tipLock.ids;
+      if (!a || !ids) return;
+      if (a === 'hide') hideShots(ids);
+      else { closeTip(); if (a === 'open') App.dpt.app.openInScope(ids); else revealShot(ids[0]); }
+    });
+    document.addEventListener('pointerdown', e => { if (tipLock && !tip.contains(e.target) && e.target !== cv) closeTip(); }, true);
     // the two clicks before it pin and unpin again, so double-click leaves the pins as they were
     cv.addEventListener('dblclick', e => { const b = cv.getBoundingClientRect(), hit = trendHit(e.clientX - b.left, e.clientY - b.top); if (hit) revealShot(hit.r.shot.id); });
   }
@@ -611,7 +699,7 @@ App.dpt.ui = (() => {
    */
   function tableEntries() {
     const rows = shownRows();
-    if (!prefs.collapse) return rows.map(r => ({ rows: [r], r, off: r.shot.hidden }));
+    if (!prefs.collapse) return rows.map(r => ({ rows: [r], r, off: isOff(r.shot) }));
     const keys = pool.paramKeys().filter(k => !k.builtin).map(k => k.key), sets = new Map();
     for (const r of rows) {
       const id = JSON.stringify([r.shot.label, ...keys.map(k => r.p[k])]);
@@ -619,7 +707,7 @@ App.dpt.ui = (() => {
       sets.get(id).push(r);
     }
     return [...sets.values()].map(all => {
-      const on = all.filter(r => !r.shot.hidden), list = on.length ? on : all;
+      const on = all.filter(r => !isOff(r.shot)), list = on.length ? on : all;
       return { rows: list, r: list[0], off: !on.length };
     });
   }
@@ -657,7 +745,8 @@ App.dpt.ui = (() => {
       return s.desc ? -d : d;
     }).map(([e]) => e);
   }
-  const rowIds = tr => (tr.dataset.ids || tr.dataset.row).split(' ');
+  /** Shot ids of a table row or pool list item (several for collapsed repeats). */
+  const rowIds = el => (el.dataset.ids || el.dataset.row || el.dataset.shot).split(' ');
   function renderTable() {
     const cols = columns(), ents = sortedEntries(), s = prefs.sort;
     const total = allRows().length, n = ents.reduce((k, e) => k + e.rows.length, 0);
@@ -857,31 +946,36 @@ App.dpt.ui = (() => {
   }
 
   // ---------------------------------------------------------------- context menu (right-click a shot in any view)
-  /** Shot id under a mouse event: pool list entry, table row, overlay curve or trend point. */
-  function shotAt(e) {
-    const el = e.target.closest('[data-shot], tr[data-row]');
-    if (el) return el.dataset.shot || el.dataset.row;
+  /**
+   * Shot ids under a mouse event: pool list entry, table row, overlay curve or trend point; several for
+   * collapsed repeats (list entry, table row, trend point), the first one is the shot the menu names.
+   */
+  function shotsAt(e) {
+    const el = e.target.closest('#pool-list [data-shot], tr[data-row]');
+    if (el) return rowIds(el);
     const hitFn = e.target.id === 'cv-overlay' ? overlayHit : e.target.id === 'cv-trend' ? trendHit : null;
-    if (!hitFn) return null;
+    if (!hitFn) return [];
     const r = e.target.getBoundingClientRect(), hit = hitFn(e.clientX - r.left, e.clientY - r.top);
-    return hit ? hit.r.shot.id : null;
+    return !hit ? [] : hit.rows ? hit.rows.map(x => x.shot.id) : [hit.r.shot.id];
   }
   const CTX = {
     open: id => App.dpt.app.openInScope([id]),
     'open-pinned': () => App.dpt.app.openInScope([...pinned]),
     pin: id => togglePin(id),
+    hide: (id, ids) => hideShots(ids),
     reveal: id => revealShot(id),
   };
   function openMenu(e) {
-    const id = shotAt(e), sh = id && pool.shots.find(s => s.id === id);
+    const ids = shotsAt(e), id = ids[0], sh = id && pool.shots.find(s => s.id === id);
     if (!sh) return;
     e.preventDefault();
     const m = $('#ctx-menu'), many = pinned.has(id) && pinned.size > 1;
-    m.dataset.shot = id;
-    m.innerHTML = `<div class="ctx-head">${esc(pool.batchOf(sh).name)} / ${esc(sh.label)}</div>
+    m.dataset.shot = id; m.dataset.ids = ids.join(' ');
+    m.innerHTML = `<div class="ctx-head">${esc(pool.batchOf(sh).name)} / ${esc(sh.label)}${ids.length > 1 ? ` · ${ids.length} repeats` : ''}</div>
       <button data-ctx="open" title="Open this shot in the analyzer, zoomed to the selected edge (O)">Open in scope view</button>
       ${many ? `<button data-ctx="open-pinned">Open all ${pinned.size} pinned shots</button>` : ''}
       <button data-ctx="pin">${pinned.has(id) ? 'Unpin' : 'Pin'}</button>
+      <button data-ctx="hide" title="Hide from plots and table for now (H); Unhide all (Shift+H) shows it again">${ids.length > 1 ? `Hide all ${ids.length} repeats` : 'Hide'}</button>
       <button data-ctx="reveal" title="Scroll the folder list to this shot (double-click a trend point)">Show in folder list</button>`;
     m.style.display = 'block';
     m.style.left = Math.min(e.clientX, innerWidth - m.offsetWidth - 4) + 'px';
@@ -896,7 +990,7 @@ App.dpt.ui = (() => {
     m.addEventListener('click', e => {
       const b = e.target.closest('[data-ctx]');
       if (!b) return;
-      closeMenu(); CTX[b.dataset.ctx](m.dataset.shot);
+      closeMenu(); CTX[b.dataset.ctx](m.dataset.shot, m.dataset.ids.split(' '));
     });
     document.addEventListener('pointerdown', e => { if (menuOpen() && !m.contains(e.target)) closeMenu(); }, true);
     window.addEventListener('keydown', e => { if (menuOpen() && e.key === 'Escape') { e.stopImmediatePropagation(); closeMenu(); } }, true);
@@ -917,7 +1011,9 @@ App.dpt.ui = (() => {
 
   function renderAll() {
     document.body.classList.toggle('empty', !pool.shots.length);
-    for (const id of [...pinned]) if (!pool.shots.some(s => s.id === id)) pinned.delete(id);
+    const known = new Set(pool.shots.map(s => s.id));
+    for (const set of [pinned, tmpHidden]) for (const id of [...set]) if (!known.has(id)) set.delete(id);
+    closeTip();
     renderSelects(); renderFilter(); renderPool(); renderTable(); renderSettings();
     drawOverlay(); drawTrend();
     const ws = pool.shots.filter(s => s.res && (s.res.warn.length || !s.res.edges.length)).length;
@@ -946,7 +1042,9 @@ App.dpt.ui = (() => {
   }
 
   /** For tools/dpt_ui_test.ps1: hover / pin state and the trend points as drawn (CSS px in #cv-trend). */
-  const debug = () => ({ hover, pinned: [...pinned], trend: tr.pts.map(p => ({ id: p.r.shot.id, X: p.X, Y: p.Y, y: p.y })), groups: groupInfo().cats });
+  const debug = () => ({ hover, pinned: [...pinned], hidden: [...tmpHidden], tip: tipLock && tipLock.ids,
+    trend: tr.pts.map(p => ({ id: p.r.shot.id, X: p.X, Y: p.Y, y: p.y, n: p.rows.length })), groups: groupInfo().cats });
 
-  return { init, prefs, debug, renderAll, toast, openBatchDialog, tableText, fitOverlay, zoomOverlay, panOverlay, cycleEdge, unpinAll, togglePin, keyShots, overlayWindow, focusFilter, compileFilter, METRICS };
+  return { init, prefs, debug, renderAll, toast, openBatchDialog, tableText, fitOverlay, zoomOverlay, panOverlay, cycleEdge, unpinAll, togglePin, keyShots, overlayWindow, focusFilter, compileFilter,
+    hideShots, hideKeyShots, unhideAll, METRICS };
 })();

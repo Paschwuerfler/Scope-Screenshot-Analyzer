@@ -17,4 +17,5 @@
 | DPT sweep page: layout / controls | `dpt.html`, `css/dpt.css`, `js/dpt/ui.js` (views, dialog), `js/dpt/app.js` (actions, `KEYS`) |
 | DPT edge metrics (slew, overshoot, ringing, levels) | `js/dpt/edges.js` (pure maths, tested by `tools/dpt_test.html`) |
 | DPT pool: folder pairing, parameters, persistence, import | `js/dpt/pool.js` |
+| DPT show / hide (saved checkboxes vs. `tmpHidden` for now), trend point popup, pool list grouping | `js/dpt/ui.js`: `hideShots`/`unhideAll`, `lockTip`, `poolEntries`/`renderPool` |
 | DPT view selects (edge, colour, Y, X, group, repeats) | `onSelect(id, key, redraw)` in `js/dpt/ui.js`: pass only the views that depend on the value; `renderAll` (default) re-lays out the whole table |
