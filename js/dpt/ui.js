@@ -37,7 +37,16 @@ App.dpt.ui = (() => {
   function savePrefs() { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch (e) { /* private window */ } }
 
   // ---------------------------------------------------------------- data helpers
-  const allRows = () => pool.rows(prefs.edge).filter(r => r.edge);
+  // Rows of the selected edge, rebuilt only on a pool change (renderAll) or another edge: hover reads them often.
+  let rowCache = null;
+  function rowData() {
+    if (!rowCache || rowCache.edge !== prefs.edge) {
+      const rows = pool.rows(prefs.edge).filter(r => r.edge);
+      rowCache = { edge: prefs.edge, rows, byId: new Map(rows.map(r => [r.shot.id, r])) };
+    }
+    return rowCache;
+  }
+  const allRows = () => rowData().rows;
   const shownRows = () => { const f = compileFilter(prefs.filter); return allRows().filter(f.test); };
   const visRows = () => shownRows().filter(r => !isOff(r.shot));
   const swCol = r => r.shot.cols[r.batch.roles.sw];
@@ -351,21 +360,51 @@ App.dpt.ui = (() => {
     const ids = pinned.size ? [...pinned] : hover ? [hover] : [];
     if (ids.length) hideShots(ids); else toast('Hover or pin a shot first.');
   }
+  /**
+   * Hover / pin changed: mark list items and table rows, repaint both plots in the next frame (from their
+   * cached layer / model, see drawOverlay and drawTrend). Must stay cheap: it runs on every hover change.
+   */
   function syncHighlight(redraw = true) {
-    for (const el of document.querySelectorAll('#pool-list [data-shot], #tbl tr[data-row]')) {
-      const ids = rowIds(el);
-      el.classList.toggle('hl', ids.includes(hover));
-      el.classList.toggle('pinned', ids.some(id => pinned.has(id)));
-    }
-    if (redraw) { drawOverlay(); drawTrend(); }
-    const r = hover && allRows().find(x => x.shot.id === hover);
+    markRows();
+    if (redraw) paintSoon();
+    const r = hover && rowData().byId.get(hover);
     $('#status-hover').textContent = r ? `${r.batch.name} / ${r.shot.label}: I = ${U.formatSI(r.p.I, 'A', 3)} · ${metric(prefs.metric).label} ${fmtMetric(metric(prefs.metric), r.edge[prefs.metric])}` : '';
+  }
+  // List items / table rows that carry .hl or .pinned: a change only touches these and the ones of the new ids.
+  let marked = [];
+  function markRows() {
+    const ids = [...pinned], els = new Set(marked.filter(el => el.isConnected));
+    if (hover && !pinned.has(hover)) ids.push(hover);
+    if (ids.length) {
+      const sel = ids.map(id => { const q = CSS.escape(id); return `[data-shot="${q}"],[data-ids~="${q}"],[data-row="${q}"]`; }).join(',');
+      for (const root of [$('#pool-list'), $('#tbl')]) for (const el of root.querySelectorAll(sel)) els.add(el);
+    }
+    marked = [];
+    for (const el of els) {
+      const ids = rowIds(el), hl = ids.includes(hover), pin = ids.some(id => pinned.has(id));
+      el.classList.toggle('hl', hl); el.classList.toggle('pinned', pin);
+      if (hl || pin) marked.push(el);
+    }
+  }
+  // Repaints requested by hover, pins and overlay pan / zoom, at most one per frame.
+  const pending = { paint: false, overlay: false };
+  let frameReq = 0;
+  function frameSoon(what) { pending[what] = true; if (!frameReq) frameReq = requestAnimationFrame(flush); }
+  const paintSoon = () => frameSoon('paint'), drawOverlaySoon = () => frameSoon('overlay');
+  /** Run the pending repaints now (next frame, or tests that measure them). */
+  function flush() {
+    if (frameReq) cancelAnimationFrame(frameReq);
+    frameReq = 0;
+    const { paint, overlay } = pending;
+    pending.paint = pending.overlay = false;
+    if (overlay) drawOverlay(); else if (paint) paintOverlay();
+    if (paint) paintTrend();
   }
   const emphasis = () => hover || pinned.size;
   const isHi = id => id === hover || pinned.has(id);
 
   // ---------------------------------------------------------------- overlay plot
-  const ov = { sx: null, sy: null, A: null, rows: [] };
+  const ov = { sx: null, sy: null, A: null, rows: [], view: null, col: null, layer: null, msg: '' };
   /** Default time window around t50: covers the slowest visible edge and the ringing window. */
   function autoView(rows) {
     let rise = 0;
@@ -373,12 +412,16 @@ App.dpt.ui = (() => {
     rise = rise || 10e-9;
     return { a: -Math.max(3 * rise, 10e-9), b: Math.max(pool.settings.ringWindow * 1.5, 4 * rise) };
   }
+  /**
+   * Full overlay redraw (data, filter, colours, zoom, size): all curves go into a cached layer (ov.layer),
+   * then paintOverlay. Hover and pins only call paintOverlay, which copies the layer (dimmed while
+   * something is highlighted) and draws the few highlighted curves on top: cheap with hundreds of shots.
+   */
   function drawOverlay() {
-    const cv = $('#cv-overlay'), { ctx, w, h } = P.fit(cv);
-    ctx.fillStyle = P.INK.bg; ctx.fillRect(0, 0, w, h);
+    const cv = $('#cv-overlay'), { w, h } = P.fit(cv);
     const rows = visRows().filter(r => r.edge.t50 !== undefined && swCol(r));
     ov.rows = rows;
-    if (!rows.length) { ov.sx = null; noData(ctx, w, h, pool.shots.length ? 'No shot with this edge is shown' : ''); return; }
+    if (!rows.length) { ov.sx = null; ov.msg = pool.shots.length ? 'No shot with this edge is shown' : ''; paintOverlay(); return; }
     const view = prefs.view || autoView(rows);
     // y range over the visible window
     let lo = Infinity, hi = -Infinity;
@@ -388,20 +431,33 @@ App.dpt.ui = (() => {
     }
     const [y0, y1] = P.extent([lo, hi], 0.05);
     const A = P.area(w, h), sx = P.scale(view.a, view.b, A.x, A.x + A.w), sy = P.scale(y0, y1, A.y + A.h, A.y);
-    Object.assign(ov, { sx, sy, A });
-    P.axes(ctx, A, sx, sy, { xUnit: 's', yUnit: 'V', xTitle: 't − t50', yTitle: 'Switch node' });
+    Object.assign(ov, { sx, sy, A, view, col: colorizer() });
+    const L = ov.layer = P.layer(cv, ov.layer && ov.layer.cv), ctx = L.ctx;
     P.clip(ctx, A);
-    const col = colorizer(), em = emphasis();
-    const draw = (r, width, alpha, color) => {
-      const c = swCol(r), t50 = r.edge.t50;
-      ctx.globalAlpha = alpha; ctx.lineWidth = width; ctx.strokeStyle = color || col.of(r);
-      App.series.strokeColumn(ctx, c, (view.a + t50 - c.t0) / c.dt, (view.b + t50 - c.t0) / c.dt,
-        i => sx(c.t0 + i * c.dt - t50), v => sy(v), A.w);
-    };
     ctx.lineJoin = 'round';
-    for (const r of rows) if (!isHi(r.shot.id)) draw(r, 1.25, em ? 0.25 : 0.9);
+    for (const r of rows) overlayCurve(ctx, r, 1.25, 0.9);
+    ctx.restore();
+    paintOverlay();
+  }
+  function overlayCurve(ctx, r, width, alpha, color) {
+    const c = swCol(r), t50 = r.edge.t50, { view, sx, sy } = ov;
+    ctx.globalAlpha = alpha; ctx.lineWidth = width; ctx.strokeStyle = color || ov.col.of(r);
+    App.series.strokeColumn(ctx, c, (view.a + t50 - c.t0) / c.dt, (view.b + t50 - c.t0) / c.dt,
+      i => sx(c.t0 + i * c.dt - t50), v => sy(v), ov.A.w);
+  }
+  /** Overlay from the cached curve layer plus the highlighted curves (hover / pins). */
+  function paintOverlay() {
+    const cv = $('#cv-overlay'), { ctx, w, h } = P.fit(cv);
+    if (ov.sx && (!ov.layer || ov.layer.cv.width !== cv.width || ov.layer.cv.height !== cv.height)) { drawOverlay(); return; }
+    ctx.fillStyle = P.INK.bg; ctx.fillRect(0, 0, w, h);
+    if (!ov.sx) { noData(ctx, w, h, ov.msg); return; }
+    const { A, sx, sy, rows } = ov;
+    P.axes(ctx, A, sx, sy, { xUnit: 's', yUnit: 'V', xTitle: 't − t50', yTitle: 'Switch node' });
+    P.copyLayer(ctx, ov.layer, emphasis() ? 0.3 : 1);
+    P.clip(ctx, A);
+    ctx.lineJoin = 'round';
     // highlighted edges in a fixed green: the blue gradient gives them too little contrast
-    for (const r of rows) if (isHi(r.shot.id)) draw(r, 2.5, 1, P.INK.hl);
+    for (const r of rows) if (isHi(r.shot.id)) overlayCurve(ctx, r, 2.5, 1, P.INK.hl);
     ctx.globalAlpha = 1;
     // level marks of the hovered edge: 10 / 90 % crossings and the settled levels
     const hr = rows.find(r => r.shot.id === hover) || (pinned.size === 1 && rows.find(r => pinned.has(r.shot.id)));
@@ -414,7 +470,7 @@ App.dpt.ui = (() => {
       for (const [t, p] of [[e.t10, 0.1], [e.t90, 0.9]]) if (t !== null) { P.marker(ctx, 'circle', sx(t - e.t50), sy(e.base + p * e.swing), 3.5); ctx.fill(); }
     }
     ctx.restore();
-    legend(ctx, A, col);
+    legend(ctx, A, ov.col);
   }
   function noData(ctx, w, h, msg) {
     ctx.save();
@@ -469,11 +525,11 @@ App.dpt.ui = (() => {
     const v = prefs.view || autoView(ov.rows);
     if (tAt === undefined) tAt = (v.a + v.b) / 2;
     prefs.view = { a: tAt + (v.a - tAt) * factor, b: tAt + (v.b - tAt) * factor };
-    drawOverlay(); savePrefsSoon();
+    drawOverlaySoon(); savePrefsSoon();
   }
   function panOverlay(frac) {
     const v = prefs.view || autoView(ov.rows), d = (v.b - v.a) * frac;
-    prefs.view = { a: v.a + d, b: v.b + d }; drawOverlay(); savePrefsSoon();
+    prefs.view = { a: v.a + d, b: v.b + d }; drawOverlaySoon(); savePrefsSoon();
   }
   const savePrefsSoon = U.debounce(savePrefs, 400);
   function initOverlayEvents() {
@@ -484,7 +540,11 @@ App.dpt.ui = (() => {
       e.preventDefault();
       const r = cv.getBoundingClientRect();
       if (e.shiftKey) panOverlay(Math.sign(e.deltaY) * 0.1);
-      else zoomOverlay(e.deltaY > 0 ? 1.25 : 0.8, ov.sx.inv(e.clientX - r.left));
+      else {
+        // from prefs.view, not ov.sx: several wheel steps can arrive before the next redraw
+        const v = prefs.view || autoView(ov.rows), f = (e.clientX - r.left - ov.A.x) / ov.A.w;
+        zoomOverlay(e.deltaY > 0 ? 1.25 : 0.8, v.a + f * (v.b - v.a));
+      }
     }, { passive: false });
     cv.addEventListener('pointerdown', e => {
       if (!ov.sx || e.button !== 0) return;   // right button: context menu, no pin
@@ -497,7 +557,7 @@ App.dpt.ui = (() => {
         if (Math.abs(e.clientX - drag.x) > 3) { drag.moved = true; cv.classList.add('dragging'); }
         if (drag.moved) {
           const dt = ov.sx.inv(drag.x - r.left) - ov.sx.inv(e.clientX - r.left);
-          prefs.view = { a: drag.view.a + dt, b: drag.view.b + dt }; drawOverlay();
+          prefs.view = { a: drag.view.a + dt, b: drag.view.b + dt }; drawOverlaySoon();
         }
         return;
       }
@@ -528,7 +588,7 @@ App.dpt.ui = (() => {
   }
 
   // ---------------------------------------------------------------- trend plot
-  const tr = { pts: [] };
+  const tr = { pts: [], model: null, msg: '' };
   /** Rate metrics: V/s -> V/ms | V/µs | V/ns so the axis reads in familiar units. */
   function rateUnit(maxAbs) {
     for (const [mult, u] of [[1e-9, 'V/ns'], [1e-6, 'V/µs'], [1e-3, 'V/ms']]) if (maxAbs * mult >= 0.5) return { mult, u };
@@ -566,17 +626,16 @@ App.dpt.ui = (() => {
       return { rows: list, g: gi.of(list[0]), x: mean(xs), y: mean(ys), xs, ys, xe: bar(xs), ye: bar(ys) };
     });
   }
+  /** Full trend redraw: points, scales and groups go into tr.model, then paintTrend (all hover needs). */
   function drawTrend() {
-    const cv = $('#cv-trend'), { ctx, w, h } = P.fit(cv);
-    ctx.fillStyle = P.INK.bg; ctx.fillRect(0, 0, w, h);
+    const { w, h } = P.fit($('#cv-trend'));
     const m = metric(prefs.metric), xk = prefs.x, xi = keyInfo(xk);
     const rows = visRows().filter(r => isFinite(r.p[xk]) && r.p[xk] !== null && isFinite(r.edge[m.key]) && r.edge[m.key] !== null);
-    tr.pts = [];
-    if (!rows.length || !xi) { noData(ctx, w, h, pool.shots.length ? 'No values for this metric' : ''); return; }
+    if (!rows.length || !xi) { tr.model = null; tr.msg = pool.shots.length ? 'No values for this metric' : ''; paintTrend(); return; }
     const logX = prefs.logX && rows.every(r => r.p[xk] > 0);
     const ru = m.rate ? rateUnit(Math.max(...rows.map(r => Math.abs(r.edge[m.key])))) : null;
     const yOf = r => r.edge[m.key] * (ru ? ru.mult : 1);
-    const gi = groupInfo(), em = emphasis(), pts = trendPoints(rows, xk, yOf, gi);
+    const gi = groupInfo(), pts = trendPoints(rows, xk, yOf, gi);
     const ys = [...pts.map(p => p.y), ...pts.flatMap(p => p.ye || [])], xs = [...pts.map(p => p.x), ...pts.flatMap(p => p.xe || [])].filter(v => !logX || v > 0);
     let [y0, y1] = P.extent(ys, 0.08);
     if (m.zero) { y0 = Math.min(0, y0); }
@@ -587,12 +646,24 @@ App.dpt.ui = (() => {
       sx = P.logScale(Math.pow(10, a), Math.pow(10, b), A.x, A.x + A.w);
     } else { const [a, b] = P.extent(xs, 0.04); sx = P.scale(a, b, A.x, A.x + A.w); }
     const sy = P.scale(y0, y1, A.y + A.h, A.y);
-    P.axes(ctx, A, sx, sy, { xUnit: xi.unit, yUnit: ru ? '' : m.unit === '%' ? '' : m.unit, xTitle: xi.label, yTitle: `${m.label} · ${EDGE_LABEL(prefs.edge).toLowerCase()}${ru ? ` (${ru.u})` : m.unit === '%' ? ' (%)' : ''}` });
-    P.clip(ctx, A);
+    const axes = { xUnit: xi.unit, yUnit: ru ? '' : m.unit === '%' ? '' : m.unit, xTitle: xi.label, yTitle: `${m.label} · ${EDGE_LABEL(prefs.edge).toLowerCase()}${ru ? ` (${ru.u})` : m.unit === '%' ? ' (%)' : ''}` };
     const groups = new Map();
     for (const p of pts) { if (!groups.has(p.g)) groups.set(p.g, []); groups.get(p.g).push(p); }
+    for (const list of groups.values()) list.sort((a, b) => a.x - b.x);
+    tr.model = { w, h, A, sx, sy, axes, groups, gi, logX };
+    tr.unit = ru ? ru.u : m.unit; tr.mult = ru ? ru.mult : 1;
+    paintTrend();
+  }
+  function paintTrend() {
+    const { ctx, w, h } = P.fit($('#cv-trend'));
+    if (tr.model && (tr.model.w !== w || tr.model.h !== h)) { drawTrend(); return; }
+    ctx.fillStyle = P.INK.bg; ctx.fillRect(0, 0, w, h);
+    tr.pts = [];
+    if (!tr.model) { noData(ctx, w, h, tr.msg); return; }
+    const { A, sx, sy, axes, groups, gi, logX } = tr.model, em = emphasis();
+    P.axes(ctx, A, sx, sy, axes);
+    P.clip(ctx, A);
     for (const [g, list] of groups) {
-      list.sort((a, b) => a.x - b.x);
       const color = P.CATEGORICAL[g] || P.INK.fg2, shape = P.MARKERS[g] || 'circle';
       ctx.globalAlpha = em ? 0.45 : 1;
       ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.beginPath();
@@ -632,7 +703,6 @@ App.dpt.ui = (() => {
       });
       ctx.restore();
     }
-    tr.unit = ru ? ru.u : m.unit; tr.mult = ru ? ru.mult : 1;
   }
   function trendHit(mx, my) {
     let best = null, bd = 14;
@@ -1052,6 +1122,7 @@ App.dpt.ui = (() => {
 
   function renderAll() {
     document.body.classList.toggle('empty', !pool.shots.length);
+    rowCache = null;
     const known = new Set(pool.shots.map(s => s.id));
     for (const set of [pinned, tmpHidden]) for (const id of [...set]) if (!known.has(id)) set.delete(id);
     closeTip();
@@ -1086,6 +1157,6 @@ App.dpt.ui = (() => {
   const debug = () => ({ hover, pinned: [...pinned], hidden: [...tmpHidden], tip: tipLock && tipLock.ids,
     trend: tr.pts.map(p => ({ id: p.r.shot.id, X: p.X, Y: p.Y, y: p.y, n: p.rows.length })), groups: groupInfo().cats });
 
-  return { init, prefs, debug, renderAll, toast, openBatchDialog, tableText, fitOverlay, zoomOverlay, panOverlay, cycleEdge, unpinAll, togglePin, keyShots, overlayWindow, focusFilter, compileFilter,
+  return { init, prefs, debug, flush, renderAll, toast, openBatchDialog, tableText, fitOverlay, zoomOverlay, panOverlay, cycleEdge, unpinAll, togglePin, keyShots, overlayWindow, focusFilter, compileFilter,
     hideShots, hideKeyShots, unhideAll, METRICS };
 })();

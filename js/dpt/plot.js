@@ -1,4 +1,4 @@
-// Small canvas plotting helpers for the DPT page: HiDPI canvas sizing, linear scales, nice
+// Small canvas plotting helpers for the DPT page: HiDPI canvas sizing, cached layers, linear scales, nice
 // ticks with one SI prefix per axis, axes + grid, colour scales and marker shapes.
 App.dpt.plot = (() => {
   const PAD = { l: 64, r: 14, t: 12, b: 34 };
@@ -18,6 +18,21 @@ App.dpt.plot = (() => {
     const ctx = canvas.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     return { ctx, w: r.width, h: r.height };
+  }
+  /**
+   * Offscreen layer with the backing-store size of `canvas` (after fit), cleared, CSS px coordinates;
+   * reuses `cv` when given. Returns { cv, ctx }; copy it back with copyLayer.
+   */
+  function layer(canvas, cv) {
+    cv = cv || document.createElement('canvas');
+    if (cv.width !== canvas.width || cv.height !== canvas.height) { cv.width = canvas.width; cv.height = canvas.height; }
+    const ctx = cv.getContext('2d'), dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, cv.width, cv.height);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { cv, ctx };
+  }
+  function copyLayer(ctx, L, alpha = 1) {
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = alpha; ctx.drawImage(L.cv, 0, 0); ctx.restore();
   }
 
   /** Plot area inside a w × h canvas. */
@@ -128,5 +143,5 @@ App.dpt.plot = (() => {
     return `rgb(${p.map((v, j) => Math.round(v + (q[j] - v) * a)).join(',')})`;
   }
 
-  return { PAD, CATEGORICAL, MARKERS, INK, SEQ, fit, area, scale, logScale, ticks, axisFormat, extent, axes, clip, marker, seq };
+  return { PAD, CATEGORICAL, MARKERS, INK, SEQ, fit, layer, copyLayer, area, scale, logScale, ticks, axisFormat, extent, axes, clip, marker, seq };
 })();

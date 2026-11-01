@@ -38,7 +38,7 @@ own setup by coding with an agent. Keep its code plain and its assumptions expli
 - `js/dpt/`: `edges` (edge metrics, pure maths) · `pool` (folders/shots, IndexedDB, import/export) · `plot`
   (canvas helpers) · `ui` (pool list, overlay, trend, table, dialogs) · `app` (actions, shortcuts, handoff).
 - `tools/`: tests (CDP-driven), glyph and demo generators. `samples/`: ground-truth screenshots
-  (`tools/samples.js`), CSVs, DPT folder `NOR45A24/`, large pool `dpt-pool-2026-10-30.json` (perf tests).
+  (`tools/samples.js`), CSVs, DPT folder `NOR45A24/`, large pool `V2_DPT_Pool_30_10_Latest.json` (perf tests).
 - `docs/ARCHITECTURE.md` (data model, data flow, coordinates, OCR, persistence) and `docs/EXTENDING.md`
   (new scope layout, measurement, samples): read before larger changes. Change map: @docs/CHANGE_MAP.md
 
@@ -79,8 +79,11 @@ No live connection to any instrument (no USB/serial/VISA/LAN). Inputs are files 
 - Repo files use LF. Python text-mode writes on Windows produce CRLF; use the Edit tool or `newline='\n'`,
   check with `git ls-files --eol`.
 - DPT performance (2026-10-30): one pool import = one save + one render (`pool.addBatches`); view selects
-  redraw only what depends on them; a full `renderAll` costs ~110 ms with 273 shots, so keep it off hover
-  and other frequent events. `edges.js` sorts Float64Arrays (exact results), keep it that way.
+  redraw only what depends on them; a full `renderAll` costs ~450 ms with 567 shots, so keep it off hover
+  and other frequent events. Hover / pins only `paintSoon()` (one repaint per frame): the overlay copies its
+  cached curve layer, the trend repaints its cached model; `drawOverlay`/`drawTrend` (full) only on data or
+  view changes. Rows are cached per edge until `renderAll`.
+  `edges.js` sorts Float64Arrays (exact results), keep it that way.
 - Known fragile spots, left as they are: `touch(null, 'prefs')` emits `doc-updated` with no doc; `#calib`
   handlers assume an active doc; `view.js` sets `SPAD`/`HANDLE_W` as a side effect of `seriesView()`;
   session import does not wait between files (picker allows one file).

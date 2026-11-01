@@ -26,10 +26,14 @@ Extend `ui_test.ps1` / `dpt_ui_test.ps1` when you change interactions.
   sets it); `dpt_ui_test.ps1` loads `samples/NOR45A24` that way.
 
 ## Performance baseline (DPT page)
-`samples/dpt-pool-2026-10-30.json` is a realistic large pool (13 folders, 273 shots, 35 MB). Load it in
-a CDP session with XHR + `App.dpt.pool.importJson(text)` and time with `performance.now()`. Measured
-2026-10-30, headless Edge: import 1.2 s (one render), restore on load 0.95 s (mostly CSV parsing),
-full `renderAll` ~110 ms (mostly layout of the edge table), hover 7–10 ms, Y-metric change ~7 ms.
+`samples/V2_DPT_Pool_30_10_Latest.json` is a realistic large pool (27 folders, 567 shots, 74 MB). Load it in
+a CDP session with XHR + `App.dpt.pool.importJson(text)` and time with `performance.now()`. Hover, pins and
+overlay pan / zoom repaint in the next animation frame: call `App.dpt.ui.flush()` right after the event to
+run that repaint inside the timed code. Canvas drawing is rasterized later, at the frame, so also time
+until two `requestAnimationFrame`s have passed, or the numbers miss most of the cost.
+Measured 2026-10-30, headless Edge, 567 shots: import 2–3 s; hover change 3–4 ms of script, frame
+done after ~35 ms (before the cached layers: ~240 ms); full `renderAll` ~450 ms script / ~500 ms to frame;
+overlay pan or zoom (redraws all curves) ~200 ms to frame, mostly software rasterization in headless mode.
 For CPU profiles use CDP `Profiler.start/stop`; time spent waiting for layout shows up under
 `getBoundingClientRect` (the plots call it after the table was rebuilt). Time each event separately:
 dozens of synchronous redraws in one loop give inflated numbers that real use never sees.
